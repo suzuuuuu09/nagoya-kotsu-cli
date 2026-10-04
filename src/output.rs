@@ -3,6 +3,13 @@ pub fn human(result: &ResultData, details: bool) -> String {
     let mut out = String::new();
     use std::fmt::Write;
     match &result.data {
+        Data::Empty => {}
+        Data::Documents(documents) => {
+            for document in documents {
+                let _ = writeln!(out, "{}  {}", document.name, document.summary);
+            }
+        }
+        Data::Document(document) => return document.content.unwrap_or_default().to_owned(),
         Data::Status(status) => {
             for r in &status.records {
                 let _ = writeln!(out, "{}\n{}", r.line, r.title);

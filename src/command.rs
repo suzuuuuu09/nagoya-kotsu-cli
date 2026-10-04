@@ -15,6 +15,7 @@ pub async fn run(client: &ApiClient, command: &Command) -> Result<ResultData, Er
         Command::Bus { command } => bus::run(client, command).await,
         Command::Subway { command } => subway::run(client, command).await,
         Command::Route(options) => route::run(client, options).await,
+        Command::Docs { command } => crate::docs::run(command),
     }
 }
 async fn status(client: &ApiClient, options: &Status) -> Result<ResultData, Error> {

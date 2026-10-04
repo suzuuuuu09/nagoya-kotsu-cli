@@ -23,6 +23,209 @@ fn status_keeps_duplicate_line_articles_and_accepts_bom() {
 }
 
 #[test]
+fn whole_command_failure_is_json_with_a_stable_code() {
+    let server = Server::new(|_| Response {
+        status: 400,
+        mime: "application/json",
+        body: "{}".into(),
+        headers: String::new(),
+    });
+    let out = server.run(&["--json", "--no-cache", "bus", "stop", "上社"]);
+    assert_eq!(out.status.code(), Some(4));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["schema_version"], 1);
+    assert_eq!(v["complete"], false);
+    assert!(v["data"].is_null());
+    assert_eq!(v["errors"][0]["code"], "http_error");
+    assert_eq!(v["errors"][0]["scope"], "command");
+    assert_eq!(v["errors"][0]["exit_code"], 4);
+    assert!(!out.stderr.is_empty());
+}
+
+#[test]
+fn argument_failures_use_json_but_help_and_version_stay_text() {
+    for args in [
+        vec!["--json", "unknown"],
+        vec!["bus", "stop", "--json"],
+        vec!["--raw", "status", "--json"],
+        vec!["--json", "subway", "next", "藤が丘", "--limit", "0"],
+        vec!["--json"],
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(v["data"].is_null());
+        assert_eq!(v["errors"][0]["code"], "invalid_arguments");
+        assert!(!out.stderr.is_empty());
+    }
+    for flag in ["--help", "--version"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+            .args(["--json", flag])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert!(serde_json::from_slice::<serde_json::Value>(&out.stdout).is_err());
+        assert!(out.stderr.is_empty());
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+        .args(["unknown", "--", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn embedded_docs_work_without_network_or_cache() {
+    let server = Server::new(|_| panic!("docs must not fetch an API"));
+    let out = server.run(&["docs", "list", "--json"]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["complete"], true);
+    let names: Vec<_> = v["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["bus", "subway", "route", "output", "troubleshooting"]
+    );
+    for name in names {
+        let out = server.run(&["docs", "show", name, "--json"]);
+        assert!(out.status.success());
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["data"]["name"], name);
+        assert!(!v["data"]["summary"].as_str().unwrap().is_empty());
+        let text = v["data"]["content"].as_str().unwrap();
+        assert!(text.starts_with("# "));
+        let out = server.run(&["docs", "show", name]);
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{text}\n"));
+    }
+    for (args, code, exit) in [
+        (vec!["docs", "show", "unknown", "--json"], "not_found", 3),
+        (
+            vec!["docs", "list", "--raw", "--json"],
+            "invalid_arguments",
+            2,
+        ),
+    ] {
+        let out = server.run(&args);
+        assert_eq!(out.status.code(), Some(exit));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["errors"][0]["code"], code);
+    }
+    let out = server.run(&["docs", "show", "bus", "--raw"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    assert!(server.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn help_explains_purpose_examples_constraints_and_docs() {
+    for (args, required) in [
+        (
+            vec!["--help"],
+            vec![
+                "市バス・地下鉄情報を取得するCLI",
+                "Examples:",
+                "nkotsu route 藤が丘 名古屋 --subway",
+                "nkotsu docs list",
+                "nkotsu docs show <name>",
+                "機械処理向けJSON",
+            ],
+        ),
+        (
+            vec!["bus", "--help"],
+            vec![
+                "市バスの情報を取得",
+                "nkotsu bus stop 上社",
+                "nkotsu bus live 上社",
+            ],
+        ),
+        (
+            vec!["bus", "live", "--help"],
+            vec![
+                "到着予測ではありません",
+                "通過済みのバスも表示",
+                "現在位置情報なし",
+                "nkotsu docs show bus",
+            ],
+        ),
+        (
+            vec!["subway", "next", "--help"],
+            vec![
+                "予定列車",
+                "リアルタイム",
+                "翌営業日",
+                "--limit <N>",
+                "nkotsu docs show subway",
+            ],
+        ),
+        (
+            vec!["route", "--help"],
+            vec![
+                "今日",
+                "翌日へ繰り越しません",
+                "指定した時刻までに到着",
+                "地下鉄のみ",
+                "nkotsu docs show route",
+            ],
+        ),
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert!(out.stderr.is_empty());
+        let text = String::from_utf8(out.stdout).unwrap();
+        for phrase in required {
+            assert!(text.contains(phrase), "missing {phrase}: {text}");
+        }
+    }
+    for command in [
+        vec!["status"],
+        vec!["bus", "stop"],
+        vec!["bus", "timetable"],
+        vec!["subway"],
+        vec!["subway", "timetable"],
+        vec!["docs"],
+        vec!["docs", "list"],
+        vec!["docs", "show"],
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+            .args(command)
+            .arg("--help")
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let text = String::from_utf8(out.stdout).unwrap();
+        let examples = text
+            .split("Examples:\n")
+            .nth(1)
+            .unwrap()
+            .split("\n\n")
+            .next()
+            .unwrap();
+        assert!(
+            examples
+                .lines()
+                .filter(|line| line.trim().starts_with("nkotsu "))
+                .count()
+                >= 2,
+            "{text}"
+        );
+        assert!(text.contains("nkotsu docs show "));
+    }
+}
+
+#[test]
 fn bus_stop_preserves_string_ids_and_reuses_persistent_master_cache() {
     let server = Server::new(|request| {
         let body = if request.contains("station_name.json") {
@@ -101,6 +304,7 @@ impl Server {
             while !flag.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
                         stream
                             .set_read_timeout(Some(std::time::Duration::from_secs(2)))
                             .unwrap();
@@ -341,14 +545,28 @@ fn route_parses_namespaced_xml_and_inverts_arrival_option() {
 
 #[test]
 fn http_failures_retry_only_allowed_statuses_and_reject_html() {
-    for (status, mime, body, code, requests) in [
-        (400, "application/json", "{}", 4, 1),
-        (502, "application/json", "{}", 4, 3),
-        (503, "application/json", "{}", 4, 3),
-        (504, "application/json", "{}", 4, 3),
-        (200, "text/html", "<html>maintenance</html>", 5, 1),
-        (200, "application/json", "<html>maintenance</html>", 5, 1),
-        (200, "application/json", "{invalid", 5, 1),
+    for (status, mime, body, code, requests, failure_code) in [
+        (400, "application/json", "{}", 4, 1, "http_error"),
+        (502, "application/json", "{}", 4, 3, "http_error"),
+        (503, "application/json", "{}", 4, 3, "http_error"),
+        (504, "application/json", "{}", 4, 3, "http_error"),
+        (
+            200,
+            "text/html",
+            "<html>maintenance</html>",
+            5,
+            1,
+            "invalid_response",
+        ),
+        (
+            200,
+            "application/json",
+            "<html>maintenance</html>",
+            5,
+            1,
+            "invalid_response",
+        ),
+        (200, "application/json", "{invalid", 5, 1, "parse_error"),
     ] {
         let server = Server::new(move |_| Response {
             status,
@@ -356,8 +574,16 @@ fn http_failures_retry_only_allowed_statuses_and_reject_html() {
             body: body.into(),
             headers: String::new(),
         });
-        let out = server.run(&["--no-cache", "status"]);
+        let out = server.run(&["--no-cache", "--json", "status"]);
         assert_eq!(out.status.code(), Some(code));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(
+            v["errors"][0]["code"],
+            failure_code,
+            "status={status}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
         assert!(!String::from_utf8_lossy(&out.stderr).contains(&server.url));
         assert_eq!(server.requests.lock().unwrap().len(), requests);
     }
@@ -381,8 +607,10 @@ fn ambiguous_endpoint_is_not_selected_and_raw_keeps_original_body() {
             r#"[{"station_cd":"001","station_div":"1","station_name":"藤が丘","latitude":35.0,"longitude":137.0},{"station_cd":"002","station_div":"2","station_name":"藤が丘","latitude":35.0,"longitude":137.0}]"#,
         )
     });
-    let out = server.run(&["--no-cache", "route", "藤が丘", "藤が丘"]);
+    let out = server.run(&["--no-cache", "--json", "route", "藤が丘", "藤が丘"]);
     assert_eq!(out.status.code(), Some(3));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["errors"][0]["code"], "ambiguous");
     assert!(String::from_utf8_lossy(&out.stderr).contains("名古屋市地下鉄"));
     assert!(String::from_utf8_lossy(&out.stderr).contains("名古屋市バス"));
     assert_eq!(server.requests.lock().unwrap().len(), 1);
@@ -517,6 +745,7 @@ fn next_reports_partial_failure_without_discarding_initial_departure() {
     assert_eq!(v["complete"], false);
     assert_eq!(v["data"]["departures"][0]["time"], "23:59");
     assert_eq!(v["errors"][0]["exit_code"], 4);
+    assert_eq!(v["errors"][0]["code"], "http_error");
     assert!(!out.stderr.is_empty());
 }
 
@@ -576,12 +805,17 @@ fn refresh_revalidates_etag_and_does_not_fallback_to_stale_cache() {
 
 #[test]
 fn route_checks_upstream_status_and_malformed_xml() {
-    for (xml, code) in [
+    for (xml, code, failure_code) in [
         (
             "<NorikaeData><Nstatus><Status>false</Status><Err><ErrorCode>NO_ROUTE</ErrorCode></Err></Nstatus></NorikaeData>",
             6,
+            "upstream_error",
         ),
-        ("<NorikaeData><Nstatus><Status>true</Status></Nstatus>", 5),
+        (
+            "<NorikaeData><Nstatus><Status>true</Status></Nstatus>",
+            5,
+            "parse_error",
+        ),
     ] {
         let server = Server::new(move |request| {
             if request.contains("StationInfos") {
@@ -604,7 +838,16 @@ fn route_checks_upstream_status_and_malformed_xml() {
                 }
             }
         });
-        let out = server.run(&["--no-cache", "route", "藤が丘", "藤が丘", "--subway"]);
+        let out = server.run(&[
+            "--no-cache",
+            "--json",
+            "route",
+            "藤が丘",
+            "藤が丘",
+            "--subway",
+        ]);
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["errors"][0]["code"], failure_code);
         assert_eq!(
             out.status.code(),
             Some(code),
@@ -700,4 +943,30 @@ fn status_valid_line_with_no_articles_is_successful_and_raw_survives_parse_error
     let raw: std::collections::BTreeMap<String, String> =
         serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(raw.values().next().unwrap(), "{invalid JSON\n");
+}
+
+#[test]
+fn connection_and_cache_failures_have_distinct_json_codes() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+        .env("NKOTSU_BASE_URL", url)
+        .args(["--json", "--no-cache", "bus", "stop", "上社"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(4));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["errors"][0]["code"], "network_error");
+    let server = Server::new(|_| panic!("cache read must fail before HTTP"));
+    let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+        .env("NKOTSU_BASE_URL", &server.url)
+        .env("NKOTSU_CACHE_DIR", "/dev/null")
+        .args(["--json", "bus", "stop", "上社"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["errors"][0]["code"], "cache_error");
+    assert!(server.requests.lock().unwrap().is_empty());
 }

@@ -25,7 +25,15 @@ nkotsu route 藤が丘 名古屋 --subway --via 栄 --arrive --at 18:00 --detail
 
 名前をNFKC正規化して完全一致、部分一致の順に検索します。同じ名前のバス停・地下鉄駅などが複数ある場合は、候補を表示して終了します。経路検索では `--bus` / `--subway`、または `藤が丘(名古屋市地下鉄)` のような具体的な候補名を指定できます。両フラグ指定・無指定では市バスと地下鉄の両方を利用します。
 
-コマンドごとの全オプションは `nkotsu <コマンド> --help` で確認できます。
+コマンドごとの目的・例・全オプションは `nkotsu <コマンド> --help` で確認できます。詳細ドキュメントはバイナリに内蔵され、インストール後も通信なしで参照できます。
+
+```sh
+nkotsu docs list
+nkotsu docs show bus
+nkotsu docs show output --json
+```
+
+文書は `bus`、`subway`、`route`、`output`、`troubleshooting`。通常の `show` はMarkdown本文、`--json` は既存Envelopeで文書を返します。docsの `--raw` は引数エラーです。開発Agent向けの `AGENTS.md` と `docs/agents/` は別の役割です。
 
 ## 時刻・日種
 
@@ -49,6 +57,8 @@ nkotsu route 藤が丘 名古屋 --subway --via 栄 --arrive --at 18:00 --detail
 ```json
 {"schema_version":1,"complete":true,"data":{},"errors":[]}
 ```
+
+引数解析を含む全体失敗もJSONをstdoutへ返し、`complete: false`、`data: null` と `errors` を持ちます。各エラーには `scope`、`code`、`exit_code`、`message` があり、種別はmessageではなくcodeで判定できます。codeは `invalid_arguments`、`not_found`、`ambiguous`、`network_error`、`http_error`、`invalid_response`、`parse_error`、`upstream_error`、`cache_error`。エラー・警告・診断はstderrへ出し、stdoutに人間向けエラーを混在させません。`--help` と `--version` は `--json` 指定時も通常の文字表示です。
 
 一部取得に失敗すると、取得済みデータを残して `complete: false` と `errors` を返し、非0で終了します。`--raw` はURLごとのオブジェクトに元のレスポンス本文を文字列で格納し、BOM・空白・改行を保持します。`--json` と同時指定はできません。
 

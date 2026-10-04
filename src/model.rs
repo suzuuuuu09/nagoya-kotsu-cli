@@ -29,6 +29,9 @@ impl ResultData {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum Data {
+    Empty,
+    Documents(Vec<crate::docs::Document>),
+    Document(crate::docs::Document),
     Status(Status),
     Stop(Stop),
     Timetable(Timetable),

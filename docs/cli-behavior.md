@@ -14,6 +14,52 @@
 
 用語はルートの [GLOSSARY.md](../GLOSSARY.md) に従う。
 
+## JSONエラー
+
+`--json` 指定時は、コマンド全体の失敗も `schema_version: 1`、`complete: false`、`data: null`、`errors` の共通形式でstdoutへ出力する。人間向けエラー文をstdoutへ混在させない。引数解析の失敗（不明なコマンド、必須引数不足、オプション競合を含む）も対象とし、機械判定用の `code` は `invalid_arguments`、終了コードは従来どおり2とする。`--json --raw` の競合もJSONエラーとして返す。
+
+`--help` と `--version` は失敗ではなく、`--json` 指定時も従来の表示を維持する。
+
+`Failure` に機械判定用の `code` を追加する。対応は以下とし、既存の終了コード0〜6は変更しない。全体失敗時も部分失敗時も同じ分類を使う。全体失敗の `scope` は `command` とし、部分失敗の既存の `scope` は維持する。
+
+| エラー種別 | code | 終了コード |
+| --- | --- | --- |
+| 引数 | `invalid_arguments` | 2 |
+| 未発見 | `not_found` | 3 |
+| 曖昧 | `ambiguous` | 3 |
+| ネットワーク | `network_error` | 4 |
+| HTTP | `http_error` | 4 |
+| 不正なレスポンス | `invalid_response` | 5 |
+| 解析 | `parse_error` | 5 |
+| API内部エラー | `upstream_error` | 6 |
+| キャッシュ | `cache_error` | 1 |
+
+`--json` 時も人間向けのエラー・警告、`--verbose` の詳細はstderrへ出す。stdoutにはJSONだけを出す。
+
+## 内蔵ドキュメント
+
+`docs list` と `docs show <name>` を追加し、`bus`、`subway`、`route`、`output`、`troubleshooting` の文書をバイナリへ埋め込む。インストール後はCLI単体で参照できる。開発Agent向けの `AGENTS.md` と `docs/agents/` の役割は変更しない。
+
+通常の `docs list` は名前と概要、`docs show` はMarkdown本文をstdoutへ出力する。`--json` は既存Envelopeを使い、`list` の `data` は名前・概要の一覧、`show` の `data` は名前・概要・Markdown本文とする。API本文を取得しないため、`docs --raw` は `invalid_arguments`、終了コード2で拒否する。
+
+文書名は上記の名前の完全一致で選択し、未知の名前は `not_found`、終了コード3で利用可能な名前を案内する。文書の参照ではAPI・永続キャッシュを利用しない。トップレベルのhelpには `nkotsu docs list` と `nkotsu docs show <name>` の案内を追加する。
+
+既存の交通情報のDomain Modelと `--raw` の形式は維持する。`--format`、MCP、Agent Skill、全文検索、JSON Schema生成は追加しない。
+
+## Help表示
+
+Clapの自動生成helpを基本とし、`about`、`long_about`、`after_help` で目的、代表例、重要な挙動を補足する。説明は内部実装ではなく、指定すると利用者にとって何が変わるかを記す。
+
+各コマンドのhelpは、目的、Usage、Arguments、Options、Examples、必要な場合のみNotes、詳細ドキュメントへの導線の順を基本とする。各主要コマンドに最低2つの実行例を載せ、内蔵ドキュメントの重要な制約も1〜2行で要約する。既存のオプションを省略せず、トップレベルにグローバルオプションの説明と `docs list` / `docs show <name>` の案内を載せる。
+
+`bus` は停留所・時刻表・接近情報を取得することを説明する。`bus live` は到着予測ではなく、現在位置情報と通過履歴を表示すること、`--all` は通過済み車両も含めること、履歴から現在位置・到着予測・遅延分・GPS座標を推定しないことを説明する。
+
+`subway next` は時刻表に基づく予定列車であり、リアルタイムの列車位置ではないことを説明する。`route` は `--arrive` が指定時刻までに到着する経路を検索すること、`--at HH:MM` が日本時間の今日を使い、過去時刻を翌日へ繰り越さないことを説明する。
+
+トップレベルと `route` の代表例で `藤が丘` から `名古屋` を検索する場合は、`--subway` を付ける。例をそのまま実行しても交通施設の曖昧性で失敗しないよう、[ADR-0003](adr/0003-reject-ambiguous-endpoint-names.md) に揃える。`--bus` だけなら市バスのみ、`--subway` だけなら地下鉄のみ、無指定または両方指定なら両方を対象にすること、交通手段指定が地点候補と乗車区間の両方へ適用されることも短く説明する。
+
+Helpの追加によって引数解析・名前解決・検索条件の既存の挙動は変更しない。
+
 ## バス接近情報
 
 `bus live` は、通常は対象停留所を未通過のバスと、対象停留所との位置関係が不明なバスを表示する。`--all` を指定すると、対象停留所を通過済みと確認できるバスも表示する。`--all` を指定しても、`--route` と `--pole` の絞り込みは維持する。

@@ -1,5 +1,11 @@
 # Project knowledge
 
+**Global output flag conflicts across subcommands**
+Clap's global `conflicts_with` check does not reject every placement of output flags across command levels: `--raw status --json` can parse successfully. Check the parsed `json` and `raw` flags together before creating the API client, so incompatible output modes never trigger a request.
+
+**Local HTTP test server sockets on macOS**
+The nonblocking listener can yield nonblocking accepted streams on macOS. Explicitly set each accepted stream to blocking mode before reading a request. Otherwise the fixture's read loop can treat a would-block read as EOF and send a response to an empty request, intermittently turning expected HTTP failures into Hyper `UnexpectedMessage` network errors. HTTP tests became repeatable after this change; production HTTP behavior does not need a workaround.
+
 **Route endpoint names and transport modes**
 The official `Suggest/StationInfos/json` response separates `station_name` from `station_div`. The official site's `GetNameFromItem` adds transport-specific suffixes for display; those suffixes are not part of the API's `station_name`. Exact names can identify different transport facilities: `藤が丘` has city bus and subway candidates, and `名古屋` has subway and Aonami Line candidates. Preserve the transport mode when resolving names and constructing the search name.
 
