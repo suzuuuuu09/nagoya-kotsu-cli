@@ -58,7 +58,10 @@ nkotsu route 藤が丘 名古屋 --subway --via 栄 --arrive --at 18:00 --detail
 
 ## 開発・検証
 
+Nixとdirenvがある場合は、初回に `direnv allow` を実行するとRustの開発ツールが読み込まれます。direnvを使わない場合は `nix develop` で同じ環境に入れます。依存するNixpkgsの版は `flake.lock` で固定しています。
+
 ```sh
+nix fmt flake.nix
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --locked
