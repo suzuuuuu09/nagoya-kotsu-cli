@@ -1,74 +1,209 @@
 # nagoya-kotsu-cli
 
-名古屋市交通局の市バス・地下鉄情報を取得するRust製CLI。バイナリ名は `nkotsu` です。v0.1.0の対象は運行情報、停留所、時刻表、接近情報、経路検索です。
+名古屋市交通局の市バス・地下鉄情報を取得するRust製CLIです。バイナリ名は `nkotsu` で、v0.1.0では運行情報、停留所、時刻表、接近情報、経路検索を利用できます。普通運賃・定期券・延着証明書は次の段階の対象です。
 
 ## インストール
 
-Rustツールチェーンを用意し、このディレクトリで実行します。
+Rustツールチェーンを用意し、リポジトリのルートで次のコマンドを実行してください。
 
 ```sh
 cargo install --path . --locked
 ```
 
-## 使用例
+## コマンド別の使い方
+
+### 運行情報: `status`
+
+市バス・地下鉄の運行状況や運行変更の記事を表示します。路線を指定するには `--line`、市バスまたは地下鉄に絞るには `--bus` または `--subway` を使います。交通手段の両方を指定すると、絞り込みません。
 
 ```sh
 nkotsu status
-nkotsu bus stop 上社
-nkotsu bus timetable 上社 --pole 4番 --route 上社12 --after 14:00 --limit 10
-nkotsu bus live 上社 --route 上社12
-nkotsu subway timetable 藤が丘 --line 東山線
-nkotsu subway next 藤が丘 --limit 3
-nkotsu route 藤が丘 名古屋 --subway --at 09:00
-nkotsu route 藤が丘 名古屋 --subway --via 栄 --arrive --at 18:00 --details
+nkotsu status --line 東山線
+nkotsu status --bus --json
 ```
 
-名前をNFKC正規化して完全一致、部分一致の順に検索します。同じ名前のバス停・地下鉄駅などが複数ある場合は、候補を表示して終了します。経路検索では `--bus` / `--subway`、または `藤が丘(名古屋市地下鉄)` のような具体的な候補名を指定できます。両フラグ指定・無指定では市バスと地下鉄の両方を利用します。
+記事作成日時とAPI取得日時は別の項目です。有効な路線で記事が0件の場合も成功として扱い、取得に失敗した場合はエラーを返します。
 
-コマンドごとの目的・例・全オプションは `nkotsu <コマンド> --help` で確認できます。詳細ドキュメントはバイナリに内蔵され、インストール後も通信なしで参照できます。
+### 停留所とのりば: `bus stop`
+
+バス停名を指定し、停留所IDとのりばを表示します。時刻表や接近情報をのりばで絞り込む前に、利用するのりば名を確認できます。
+
+```sh
+nkotsu bus stop 上社
+nkotsu bus stop 上社 --json
+```
+
+### 市バスの時刻表: `bus timetable`
+
+指定した停留所の発車予定を表示します。系統・のりば・時刻を絞り込み、表示件数を指定できます。
+
+```sh
+nkotsu bus timetable 上社
+nkotsu bus timetable 上社 --pole 4番 --route 上社12 --after 14:00 --limit 10
+nkotsu bus timetable 上社 --day weekday --json
+```
+
+| オプション | 指定すると変わる内容 |
+| --- | --- |
+| `--route <ROUTE>` | 系統名で絞り込む。例: `上社12` |
+| `--pole <POLE>` | のりばで絞り込む。例: `4番` |
+| `--day <DAY>` | 使用する日種を指定する。省略時は自動判定 |
+| `--after <HH:MM>` | 指定時刻以降の予定便を表示する。00:00〜27:59を指定可能 |
+| `--limit <N>` | 表示件数を1件以上で指定する |
+
+存在しない系統・のりばの指定はエラーになります。有効な指定で便が0件の場合は成功として扱います。営業日と日種の扱いは、後述の「時刻表の営業日と日種」を参照してください。
+
+### 市バスの接近情報: `bus live`
+
+指定した停留所の現在位置情報と通過履歴を表示します。系統やのりばで絞るには、`--route` と `--pole` を使います。
+
+```sh
+nkotsu bus live 上社 --route 上社12
+nkotsu bus live 上社 --pole 4番
+nkotsu bus live 上社 --route 上社12 --all --json
+```
+
+`--all` は対象停留所を通過済みの車両も表示するオプションです。指定しても系統・のりばの絞り込みは維持します。表示対象と、現在位置が取得できない場合の扱いは、後述の「接近情報の表示範囲」を参照してください。
+
+### 地下鉄の時刻表: `subway timetable`
+
+地下鉄駅の発車予定を表示します。路線を指定するには `--line`、方面を指定するには `--direction` を使います。
+
+```sh
+nkotsu subway timetable 藤が丘 --line 東山線
+nkotsu subway timetable 藤が丘 --day weekday --after 14:00 --limit 10
+nkotsu subway timetable 栄 --line 東山線 --direction 藤が丘方面 --json
+```
+
+`--day` は使用する日種、`--after HH:MM` は表示を始める時刻、`--limit N` は表示件数を指定します。時刻には00:00〜27:59、件数には1以上を指定できます。日種を自動判定できない場合は、`--day` を指定してください。
+
+### 地下鉄の次発案内: `subway next`
+
+指定時刻以降に発車する予定列車を、時刻表から検索します。`--at` を省略すると現在時刻を使い、`--limit` を省略すると5件表示します。
+
+```sh
+nkotsu subway next 藤が丘 --limit 3
+nkotsu subway next 栄 --line 東山線 --direction 藤が丘方面
+nkotsu subway next 藤が丘 --at 23:59 --day weekday --limit 3 --json
+```
+
+路線・方面・日種は、時刻表と同じ `--line`、`--direction`、`--day` で指定できます。`--at HH:MM` には00:00〜27:59を指定できます。検索範囲と日種の上書きは、後述の「時刻表の営業日と日種」を参照してください。
+
+### 経路検索: `route`
+
+出発地と到着地を指定し、経路を検索します。地下鉄駅の「藤が丘」から「名古屋」を調べる例では、同名の市バス停と区別するために `--subway` を指定しています。
+
+```sh
+nkotsu route 藤が丘 名古屋 --subway --at 09:00
+nkotsu route 藤が丘 名古屋 --subway --via 栄 --arrive --at 18:00 --details
+nkotsu route 藤が丘 名古屋 --subway --first
+nkotsu route 藤が丘 名古屋 --subway --last --slow-transfer --json
+```
+
+| オプション | 指定すると変わる内容 |
+| --- | --- |
+| `--at <TIME>` | 検索日時を指定する。`HH:MM` または `YYYY-MM-DDTHH:MM` |
+| `--arrive` | 指定時刻までに到着する経路を検索する |
+| `--first` | 始発を検索する |
+| `--last` | 終発を検索する |
+| `--via <STATION>` | 経由地を指定する |
+| `--bus` | 市バスのみを対象にする。`--subway` も指定すると両方 |
+| `--subway` | 地下鉄のみを対象にする。`--bus` も指定すると両方 |
+| `--slow-transfer` | ゆっくり乗換の条件で検索する |
+| `--details` | のりば・区間運賃などの詳細を表示する |
+
+`--first` と `--last` は互いに同時指定できず、どちらも `--at` や `--arrive` と組み合わせることはできません。日付を省略した場合の扱いは、後述の「経路検索の日時」を参照してください。
+
+### 名前の検索と候補の選択
+
+名前はNFKC正規化し、完全一致する候補を優先して検索します。完全一致する候補がなければ部分一致で検索し、候補が複数あれば候補を表示して終了します。
+
+経路検索では、`--bus` だけなら市バスのみ、`--subway` だけなら地下鉄のみを対象にします。両方を指定した場合と、どちらも指定しない場合は、市バスと地下鉄の両方を対象にします。同名の交通施設を区別するには、交通手段を指定するか、`藤が丘(名古屋市地下鉄)` のような具体的な候補名を使ってください。
+
+## ヘルプと内蔵ドキュメント
+
+コマンドごとの目的、実行例、全オプションは `nkotsu <コマンド> --help` で確認できます。詳細ドキュメントもバイナリに内蔵しているため、インストール後に通信なしで参照できます。
 
 ```sh
 nkotsu docs list
+nkotsu docs list --json
 nkotsu docs show bus
 nkotsu docs show output --json
 ```
 
-文書は `bus`、`subway`、`route`、`output`、`troubleshooting`。通常の `show` はMarkdown本文、`--json` は既存Envelopeで文書を返します。docsの `--raw` は引数エラーです。開発Agent向けの `AGENTS.md` と `docs/agents/` は別の役割です。
+`docs list` は文書名と概要を一覧表示し、`docs show <name>` は指定した文書のMarkdown本文を表示します。文書名は `bus`、`subway`、`route`、`output`、`troubleshooting` です。
 
-## 時刻・日種
+`--json` を指定すると、`list` は名前・概要の一覧、`show` は名前・概要・本文をJSONで返します。APIの生レスポンスを取得するコマンドではないため、docsでの `--raw` 指定は引数エラーになります。
 
-時刻表・接近情報は04:00を営業日の境界とし、00〜03時を24〜27時として表示します。次発は時刻表から算出した**予定列車**です。翌営業日まで調べ、各便の日付・日種を表示します。`--day` は最初の営業日だけに適用します。
+開発Agent向けの `AGENTS.md` と `docs/agents/` は、リポジトリで作業する際の指示です。CLIの使い方は、上記の内蔵ドキュメントで確認してください。
 
-- 市バスの `--day`: `weekday` / `saturday` / `holiday`
-- 地下鉄の `--day`: `weekday` / `holiday` / `new-year` / `all-night`
+## 時刻表の営業日と日種
 
-自動選択は同梱の内閣府祝日データと、公式サイト設定に明記された適用期間・特別休日に基づきます。ダイヤのキーがあるだけでは特別ダイヤを選びません。祝日データの対象年は1955〜2027年で、対象外は `--day` を指定してください。臨時変更すべての自動判定は保証しません。
+時刻表と接近情報は04:00を営業日の境界とし、00〜03時台を前の営業日の24〜27時台として表示します。
 
-経路検索は常に日本時間です。`--at HH:MM` は今日の暦日、`--at 2026-10-05T09:00` は指定日として検索します。過去時刻を翌日へ繰り越しません。`--first` は始発、`--last` は終発、`--slow-transfer` はゆっくり乗換です。
+地下鉄の次発案内は時刻表から算出した予定列車であり、実際の列車位置を示しません。翌営業日まで検索して各便の日付と日種を表示し、`--day` の上書きは最初の営業日だけに適用します。
 
-接近情報の通過履歴から現在位置・到着予測・遅延分・GPS座標を推定しません。履歴だけなら「現在位置情報なし」と表示します。通常は未通過・位置関係不明の車両を表示し、`--all` は通過済み車両も含めます。
+日種は、時刻表を分類する運行日の区分です。`--day` に指定できる値は次のとおりです。
 
-## 出力とキャッシュ
+- 市バス: `weekday` / `saturday` / `holiday`
+- 地下鉄: `weekday` / `holiday` / `new-year` / `all-night`
 
-全コマンドで `--json` / `--raw` / `--refresh` / `--no-cache` / `--timeout SECONDS` / `--verbose` / `--quiet` / `--no-color` が使えます。デフォルトタイムアウトは10秒、表示はANSIカラーを使用しません。`--quiet` でも結果・エラー・欠落の警告は残します。
+日種の自動選択には、同梱の内閣府祝日データと、公式サイト設定に明記された適用期間・特別休日を使います。特別ダイヤのデータが存在するだけでは、そのダイヤを選択しません。祝日データの対象年は1955〜2027年で、対象外の年では `--day` を指定してください。臨時変更をすべて自動判定することは保証していません。
 
-`--json` はAPIの生データではなく、正規化した安定形式です。
+## 経路検索の日時
+
+経路検索の日時は日本時間として扱います。`--at HH:MM` は今日の日付、`--at 2026-10-05T09:00` は指定日として検索し、過去の時刻でも翌日へ繰り越しません。
+
+## 接近情報の表示範囲
+
+市バスの接近情報は、取得した現在位置情報と通過履歴を表示します。通常は対象停留所を未通過の車両と、対象停留所との位置関係が不明な車両を表示し、`--all` を指定すると通過済みの車両も含めます。
+
+通過履歴だけの場合は「現在位置情報なし」と表示します。履歴が示すのは記録された通過地点と時刻であり、取得時点の位置を保証しません。そのため、履歴から現在位置、到着予測、遅延分、GPS座標を推定しません。
+
+## 出力形式と終了コード
+
+出力やキャッシュに関するオプションは全コマンド共通です。
+
+取得結果は標準出力（stdout）へ、エラー、取得結果の欠落を知らせる警告、診断情報は標準エラー出力（stderr）へ出します。`--quiet` は補助メッセージだけを抑制し、結果・エラー・警告は残します。`--verbose` は詳細な診断を表示します。
+
+表示にはANSIカラーを使用せず、`--no-color` も指定できます。
+
+`--json` は、コマンドごとの正規化済みデータを共通の外側のオブジェクト（Envelope）に格納します。成功時の形式は次のとおりです。
 
 ```json
 {"schema_version":1,"complete":true,"data":{},"errors":[]}
 ```
 
-引数解析を含む全体失敗もJSONをstdoutへ返し、`complete: false`、`data: null` と `errors` を持ちます。各エラーには `scope`、`code`、`exit_code`、`message` があり、種別はmessageではなくcodeで判定できます。codeは `invalid_arguments`、`not_found`、`ambiguous`、`network_error`、`http_error`、`invalid_response`、`parse_error`、`upstream_error`、`cache_error`。エラー・警告・診断はstderrへ出し、stdoutに人間向けエラーを混在させません。`--help` と `--version` は `--json` 指定時も通常の文字表示です。
+独立した取得の一部が失敗した場合は、取得できたデータを保持し、`complete: false` と `errors` を返します。引数解析を含むコマンド全体の失敗もJSONで返し、その場合は `data: null` とします。どちらの失敗も終了コードは非0で、stdoutに人間向けエラーを混在させません。
 
-一部取得に失敗すると、取得済みデータを残して `complete: false` と `errors` を返し、非0で終了します。`--raw` はURLごとのオブジェクトに元のレスポンス本文を文字列で格納し、BOM・空白・改行を保持します。`--json` と同時指定はできません。
+各エラーには `scope`、`code`、`exit_code`、`message` が含まれます。機械的に種別を判定する場合は、メッセージの文字列ではなく `code` を使ってください。終了コード0は成功を示し、有効な条件で結果が0件の場合も含みます。非0の終了コードとエラー種別の対応は次のとおりです。
 
-静的マスター・時刻表をOS標準のユーザーキャッシュディレクトリに保存します。HTTPのCache-Control、ETag、Last-Modifiedを使い、期限指定がない場合はマスター24時間・時刻表6時間です。`--refresh` は再検証、`--no-cache` は永続キャッシュの読み書きを無効にします。再取得に失敗しても古いキャッシュへ戻りません。運行情報・接近情報は毎回取得します。同時HTTP数は最大4、接続失敗・タイムアウト・502/503/504だけ最大2回再試行します。
+| 終了コード | エラー種別 | code |
+| --- | --- | --- |
+| 1 | その他。キャッシュの失敗を含む | `cache_error`（キャッシュの失敗時） |
+| 2 | 引数 | `invalid_arguments` |
+| 3 | 未発見・曖昧 | `not_found` / `ambiguous` |
+| 4 | HTTP・ネットワーク | `http_error` / `network_error` |
+| 5 | レスポンス形式・解析 | `invalid_response` / `parse_error` |
+| 6 | API内部エラー | `upstream_error` |
 
-終了コード: 0成功（0件を含む）、1その他、2引数、3未発見・曖昧、4HTTP・ネットワーク、5レスポンス形式・解析、6API内部エラー。
+一方、`--raw` は取得URLをキー、元のレスポンス本文を値とするJSONオブジェクトを返します。本文は文字列として格納し、BOM、空白、改行を保持します。`--json` と `--raw` は同時指定できません。
 
-## 開発・検証
+`--help` と `--version` は、`--json` を指定しても通常の文字表示で返します。
+
+## キャッシュとHTTP取得
+
+静的マスターと時刻表は、OS標準のユーザーキャッシュディレクトリへ保存します。HTTPのCache-Control、ETag、Last-Modifiedを使い、期限の指定がなければ有効期間をマスターは24時間、時刻表は6時間とします。運行情報と接近情報は毎回取得します。
+
+保存済みのデータを再検証するには `--refresh` を指定します。`--no-cache` は、永続キャッシュの読み書きを無効にします。再取得に失敗しても、古いキャッシュへ戻ることはありません。
+
+HTTPタイムアウトは `--timeout SECONDS` で指定でき、既定値は10秒です。同時HTTP数は最大4で、接続失敗、タイムアウト、HTTP 502・503・504の場合に限り、最大2回再試行します。
+
+## 開発環境と検証
 
 Nixとdirenvがある場合は、初回に `direnv allow` を実行するとRustの開発ツールが読み込まれます。direnvを使わない場合は `nix develop` で同じ環境に入れます。依存するNixpkgsの版は `flake.lock` で固定しています。
+
+フォーマットと検証には、次のコマンドを使います。
 
 ```sh
 nix fmt flake.nix
@@ -77,8 +212,12 @@ cargo clippy --all-targets -- -D warnings
 cargo test --locked
 ```
 
-テストはローカルHTTPサーバーを使い、実際のCLIのstdout・stderr・終了コードを確認します。公式APIへアクセスしません。テスト・開発用の `NKOTSU_BASE_URL` は全APIの取得先、`NKOTSU_CACHE_DIR` はキャッシュ保存先を上書きします。
+テストはローカルHTTPサーバーを使い、実際のCLIのstdout、stderr、終了コードを確認します。公式APIにはアクセスしません。テスト・開発用の `NKOTSU_BASE_URL` は全APIの取得先、`NKOTSU_CACHE_DIR` はキャッシュ保存先を上書きします。
 
-祝日データは[内閣府の国民の祝日](https://www8.cao.go.jp/chosei/shukujitsu/gaiyou.html)の[CSV](https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv)から日付列をUTF-8の `YYYY-MM-DD` に変換したものです。更新時は公式CSVの対象年を確認し、`data/holidays.txt` と上記対象年を合わせて更新してください。
+## 祝日データの更新
 
-公式サイトの内部APIを利用しており、公開APIとしての互換性保証はありません。実装上の決定は [CLI動作仕様](docs/cli-behavior.md)、用語は [GLOSSARY.md](GLOSSARY.md)、確認したAPI固有の注意点は [KNOWLEDGE.md](KNOWLEDGE.md) を参照してください。普通運賃・定期券・延着証明書は次の段階の対象です。
+祝日データは、[内閣府の国民の祝日](https://www8.cao.go.jp/chosei/shukujitsu/gaiyou.html)の[CSV](https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv)から日付列を取り出し、UTF-8の `YYYY-MM-DD` に変換したものです。更新時は公式CSVの対象年を確認し、`data/holidays.txt` と、このREADMEに記した対象年を合わせて更新してください。
+
+## 内部APIと設計資料
+
+公式サイトの内部APIを利用しており、公開APIとしての互換性保証はありません。実装上の決定は [CLI動作仕様](docs/cli-behavior.md)、用語は [GLOSSARY.md](GLOSSARY.md)、確認したAPI固有の注意点は [KNOWLEDGE.md](KNOWLEDGE.md) に記録しています。
