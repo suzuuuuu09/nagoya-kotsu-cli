@@ -1,0 +1,22 @@
+[package]
+name = "nagoya-kotsu-cli"
+version = "0.1.0"
+edition = "2024"
+description = "名古屋市交通局の市バス・地下鉄情報を取得するCLI"
+
+[[bin]]
+name = "nkotsu"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+quick-xml = "0.38"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+unicode-normalization = "0.1"
