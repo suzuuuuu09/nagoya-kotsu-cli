@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     name = "nkotsu",
     version,
     about = "名古屋市交通局の市バス・地下鉄情報を取得するCLI",
-    after_help = "Examples:\n  nkotsu status\n  nkotsu bus live 上社\n  nkotsu subway next 藤が丘\n  nkotsu route 藤が丘 名古屋 --subway\n  nkotsu route 藤が丘 名古屋 --subway --json\n\nNotes:\n  --json と --raw は同時指定できません。エラー・警告・診断はstderrへ出します。\n\nDetailed documentation:\n  nkotsu docs list\n  nkotsu docs show <name>",
+    after_help = "Examples:\n  nkotsu status\n  nkotsu bus live 上社\n  nkotsu subway next 藤が丘\n  nkotsu route 藤が丘 名古屋 --subway\n  nkotsu route 藤が丘 名古屋 --subway --json\n  nkotsu fare 藤が丘 名古屋\n  nkotsu pass 藤が丘 名古屋 --type 大学生 --months 1\n  nkotsu delay-cert --line 東山線\n\nNotes:\n  --json と --raw は同時指定できません。エラー・警告・診断はstderrへ出します。\n\nDetailed documentation:\n  nkotsu docs list\n  nkotsu docs show <name>",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -101,6 +101,24 @@ pub enum Command {
     )]
     Route(Route),
     #[command(
+        about = "普通運賃を検索",
+        long_about = "料金検索用データから駅間の普通運賃を取得します。複数の料金経路がある場合はすべて表示し、最初の経路を最短・推奨経路として扱いません。",
+        after_help = "Examples:\n  nkotsu fare 藤が丘 名古屋\n  nkotsu fare 藤が丘 名古屋 --json\n  nkotsu fare 藤が丘 名古屋 --route 東山線\n\nMore:\n  nkotsu docs show fare"
+    )]
+    Fare(Fare),
+    #[command(
+        about = "定期券料金を検索",
+        long_about = "料金経路ごとの定期券料金を取得します。表示料金から購入資格を判定しません。券種名はAPIの候補から選びます。",
+        after_help = "Examples:\n  nkotsu pass 藤が丘 名古屋\n  nkotsu pass 藤が丘 名古屋 --type 大学生 --months 1\n  nkotsu pass 藤が丘 名古屋 --with-bus --json\n\nMore:\n  nkotsu docs show pass"
+    )]
+    Pass(Pass),
+    #[command(
+        about = "延着証明書を表示",
+        long_about = "交通局が公開している延着証明書の一覧を取得します。現在の遅延状況ではありません。現在の運行状況は status で確認してください。",
+        after_help = "Examples:\n  nkotsu delay-cert\n  nkotsu delay-cert --line 東山線 --json\n  nkotsu delay-cert --date 2026-09-08 --limit 5\n\nMore:\n  nkotsu docs show delay-cert"
+    )]
+    DelayCert(DelayCert),
+    #[command(
         about = "nkotsuの詳細ドキュメントを表示",
         long_about = "バイナリに内蔵された詳細ドキュメントを表示します。通信や永続キャッシュは使用しません。",
         after_help = "Examples:\n  nkotsu docs list\n  nkotsu docs show output\n\nNotes:\n  --json で文書を機械処理向けに取得できます。--raw は使用できません。\n\nMore:\n  nkotsu docs show output"
@@ -119,6 +137,47 @@ pub struct Status {
     pub bus: bool,
     #[arg(long, help = "地下鉄の運行情報に絞り込み（両方指定では絞り込まない）")]
     pub subway: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct Fare {
+    #[arg(help = "出発駅名")]
+    pub from: String,
+    #[arg(help = "到着駅名")]
+    pub to: String,
+    #[arg(long, help = "料金経路名で絞り込む", value_name = "ROUTE")]
+    pub route: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct Pass {
+    #[command(flatten)]
+    pub fare: Fare,
+    #[arg(long = "type", help = "APIの券種名で絞り込む", value_name = "TYPE")]
+    pub ticket_type: Option<String>,
+    #[arg(long, help = "定期券の期間で絞り込む", value_name = "MONTHS", value_parser = ["1", "3", "6"])]
+    pub months: Option<String>,
+    #[arg(long, help = "市バス併用用の定期料金区分を使用")]
+    pub with_bus: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct DelayCert {
+    #[arg(long, help = "路線名で絞り込む", value_name = "LINE")]
+    pub line: Option<String>,
+    #[arg(long, help = "証明対象の日付で絞り込む", value_name = "YYYY-MM-DD", value_parser = calendar_date)]
+    pub date: Option<chrono::NaiveDate>,
+    #[arg(long, help = "表示件数（1以上、省略時は全件）", value_name = "N", value_parser = clap::value_parser!(u32).range(1..))]
+    pub limit: Option<u32>,
+}
+
+fn calendar_date(s: &str) -> Result<chrono::NaiveDate, String> {
+    let date = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map_err(|_| "日付は実在する暦日の YYYY-MM-DD で指定してください".to_owned())?;
+    if date.format("%Y-%m-%d").to_string() != s {
+        return Err("日付は YYYY-MM-DD で指定してください".into());
+    }
+    Ok(date)
 }
 
 #[derive(Debug, Subcommand)]
@@ -293,7 +352,9 @@ pub enum Docs {
         after_help = "Examples:\n  nkotsu docs show bus\n  nkotsu docs show output --json\n\nNotes:\n  文書名は完全一致で指定します。未知の名前は候補と終了コード3を返します。\n\nMore:\n  nkotsu docs show output"
     )]
     Show {
-        #[arg(help = "文書名: bus / subway / route / output / troubleshooting")]
+        #[arg(
+            help = "文書名: bus / subway / route / fare / pass / delay-cert / output / troubleshooting"
+        )]
         name: String,
     },
 }

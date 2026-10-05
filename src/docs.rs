@@ -13,7 +13,7 @@ pub struct Document {
     pub content: Option<&'static str>,
 }
 
-const DOCUMENTS: [Document; 5] = [
+const DOCUMENTS: [Document; 8] = [
     Document {
         name: "bus",
         summary: "市バスの停留所・時刻表・接近情報",
@@ -28,6 +28,21 @@ const DOCUMENTS: [Document; 5] = [
         name: "route",
         summary: "経路検索と交通手段・時刻の指定",
         content: Some(include_str!("../docs/cli/route.md")),
+    },
+    Document {
+        name: "fare",
+        summary: "普通運賃と料金経路",
+        content: Some(include_str!("../docs/cli/fare.md")),
+    },
+    Document {
+        name: "pass",
+        summary: "定期券料金と券種・期間・市バス併用",
+        content: Some(include_str!("../docs/cli/pass.md")),
+    },
+    Document {
+        name: "delay-cert",
+        summary: "延着証明書と証明対象日",
+        content: Some(include_str!("../docs/cli/delay-cert.md")),
     },
     Document {
         name: "output",

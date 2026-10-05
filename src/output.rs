@@ -1,9 +1,63 @@
 use crate::model::{Data, ResultData};
-pub fn human(result: &ResultData, details: bool) -> String {
+pub fn human(result: &ResultData, details: bool, quiet: bool) -> String {
     let mut out = String::new();
     use std::fmt::Write;
     match &result.data {
         Data::Empty => {}
+        Data::Fare(fare) => {
+            let _ = writeln!(out, "{} → {}", fare.from, fare.to);
+            if fare.routes.is_empty() {
+                let _ = writeln!(out, "該当する運賃経路はありません");
+            }
+            for (i, route) in fare.routes.iter().enumerate() {
+                let yen = route
+                    .fare_yen
+                    .map(|v| format!("{v}円"))
+                    .unwrap_or("不明".into());
+                let _ = writeln!(out, "\n{}. {}\n   普通運賃: {yen}", i + 1, route.name);
+            }
+        }
+        Data::Pass(pass) => {
+            let _ = writeln!(out, "{} → {}", pass.from, pass.to);
+            if pass.routes.is_empty() {
+                let _ = writeln!(out, "該当する定期券の料金経路はありません");
+            }
+            for route in &pass.routes {
+                let _ = writeln!(out, "\n{}", route.name);
+                if route.types.is_empty() {
+                    let _ = writeln!(out, "  表示できる券種・料金はありません");
+                }
+                for ticket in &route.types {
+                    let _ = writeln!(out, "\n{}", ticket.name);
+                    for price in &ticket.prices {
+                        let _ = writeln!(out, "  {}か月  {}円", price.months, price.yen);
+                    }
+                }
+            }
+            if !quiet {
+                let _ = writeln!(
+                    out,
+                    "\n※表示料金は料金データに基づくもので、購入資格を保証しません。"
+                );
+            }
+        }
+        Data::DelayCertificates(data) => {
+            if data.certificates.is_empty() {
+                let _ = writeln!(out, "該当する延着証明書はありません");
+            }
+            for (i, cert) in data.certificates.iter().enumerate() {
+                let _ = writeln!(
+                    out,
+                    "\n{}. {}  {}\n   {}\n   最大遅延: {}\n   証明書: {}",
+                    i + 1,
+                    cert.date,
+                    cert.line,
+                    cert.title,
+                    cert.max_delay_time,
+                    cert.url
+                );
+            }
+        }
         Data::Documents(documents) => {
             let width = documents
                 .iter()

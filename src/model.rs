@@ -37,6 +37,57 @@ pub enum Data {
     Timetable(Timetable),
     Live(Live),
     Route(RouteResult),
+    Fare(FareResult),
+    Pass(PassResult),
+    DelayCertificates(DelayCertificates),
+}
+
+#[derive(Debug, Serialize)]
+pub struct FareResult {
+    pub from: String,
+    pub to: String,
+    pub routes: Vec<FareRoute>,
+}
+#[derive(Debug, Serialize)]
+pub struct FareRoute {
+    pub name: String,
+    pub fare_yen: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PassResult {
+    pub from: String,
+    pub to: String,
+    pub routes: Vec<PassRoute>,
+}
+#[derive(Debug, Serialize)]
+pub struct PassRoute {
+    pub name: String,
+    pub types: Vec<PassType>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct PassType {
+    pub name: String,
+    pub prices: Vec<PassPrice>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct PassPrice {
+    pub months: u8,
+    pub yen: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DelayCertificates {
+    pub fetched_at: String,
+    pub certificates: Vec<DelayCertificate>,
+}
+#[derive(Debug, Serialize)]
+pub struct DelayCertificate {
+    pub line: String,
+    pub date: String,
+    pub title: String,
+    pub max_delay_time: String,
+    pub url: String,
 }
 
 #[derive(Debug, Serialize)]

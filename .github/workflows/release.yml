@@ -107,7 +107,7 @@ jobs:
           if version != f"nkotsu {os.environ['RELEASE_TAG'][1:]}":
               raise SystemExit("Binary version does not match the release tag")
           docs = json.loads(subprocess.check_output([str(binary), "docs", "list", "--json"]))
-          if not docs["complete"] or len(docs["data"]) != 5:
+          if not docs["complete"] or len(docs["data"]) != 8:
               raise SystemExit("Embedded documents are missing")
           stage = Path(os.environ["RUNNER_TEMP"]) / name
           stage.mkdir()

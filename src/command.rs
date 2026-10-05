@@ -6,6 +6,9 @@ use crate::{
     model::{Data, ResultData},
 };
 pub mod bus;
+pub mod delay_cert;
+pub mod fare;
+pub mod pass;
 pub mod route;
 pub mod subway;
 
@@ -15,6 +18,9 @@ pub async fn run(client: &ApiClient, command: &Command) -> Result<ResultData, Er
         Command::Bus { command } => bus::run(client, command).await,
         Command::Subway { command } => subway::run(client, command).await,
         Command::Route(options) => route::run(client, options).await,
+        Command::Fare(options) => fare::run(client, options).await,
+        Command::Pass(options) => pass::run(client, options).await,
+        Command::DelayCert(options) => delay_cert::run(client, options).await,
         Command::Docs { command } => crate::docs::run(command),
     }
 }

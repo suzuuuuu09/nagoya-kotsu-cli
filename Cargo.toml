@@ -1,6 +1,6 @@
 [package]
 name = "nagoya-kotsu-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "名古屋市交通局の市バス・地下鉄情報を取得するCLI"
 license = "Apache-2.0"

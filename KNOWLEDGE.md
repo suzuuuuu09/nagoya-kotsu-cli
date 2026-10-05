@@ -6,6 +6,9 @@ CI and release workflows use the current Rust stable toolchain; the development 
 **Cargo package include patterns**
 Anchor release `include` patterns with a leading `/`. Unanchored names such as `README.md` and `LICENSE` also match files beneath `.direnv/flake-inputs`, and explicit includes override Git ignore rules. A local package check pulled Nixpkgs files into the archive until the patterns were rooted. Inspect the actual `.crate` file list, not just whether packaging compiles.
 
+**Shared package-verification build artifacts**
+An existing `target/debug/nkotsu` and its dependency file referenced the extracted `target/package/nagoya-kotsu-cli-0.1.0` sources. Ordinary builds and integration tests reused that old CLI even after the working-tree CLI changed; the same test passed with a fresh `CARGO_TARGET_DIR`. If a new command remains unrecognized after Cargo reports a fresh build, inspect the binary dependency file and verify in a separate target directory. Use a separate target directory for package verification to keep those artifacts out of the development build.
+
 **Global output flag conflicts across subcommands**
 Clap's global `conflicts_with` check does not reject every placement of output flags across command levels: `--raw status --json` can parse successfully. Check the parsed `json` and `raw` flags together before creating the API client, so incompatible output modes never trigger a request.
 

@@ -130,6 +130,7 @@ fn display(
         Ok(output::human(
             result,
             matches!(&cli.command, cli::Command::Route(r) if r.details),
+            cli.quiet,
         ))
     };
     match serialized {

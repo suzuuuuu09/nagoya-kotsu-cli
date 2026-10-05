@@ -1,6 +1,6 @@
 ---
 name: nagoya-kotsu
-description: nkotsu CLIで名古屋市交通局の市バス・地下鉄の運行情報、停留所、時刻表、接近情報、経路を調べる。名古屋市営交通について利用者から問い合わせを受けたときに使う。
+description: nkotsu CLIで名古屋市交通局の市バス・地下鉄の運行情報、停留所、時刻表、接近情報、経路、普通運賃、定期券料金、延着証明書を調べる。名古屋市営交通について利用者から問い合わせを受けたときに使う。
 ---
 
 # 名古屋市営交通を調べる
@@ -24,6 +24,9 @@ description: nkotsu CLIで名古屋市交通局の市バス・地下鉄の運行
 | 地下鉄の時刻表 | `nkotsu subway timetable <駅>` | `nkotsu docs show subway` |
 | 地下鉄の次の予定列車 | `nkotsu subway next <駅>` | `nkotsu docs show subway` |
 | 出発地から到着地までの経路 | `nkotsu route <出発地> <到着地>` | `nkotsu docs show route` |
+| 普通運賃 | `nkotsu fare <FROM> <TO>` | `nkotsu docs show fare` |
+| 定期券料金 | `nkotsu pass <FROM> <TO>` | `nkotsu docs show pass` |
+| 延着証明書 | `nkotsu delay-cert` | `nkotsu docs show delay-cert` |
 
 該当する文書とサブコマンドの `--help` を読み、必要なオプションを選ぶ。出力の読み方は `nkotsu docs show output`、失敗への対処は `nkotsu docs show troubleshooting` を参照する。
 
@@ -53,6 +56,10 @@ description: nkotsu CLIで名古屋市交通局の市バス・地下鉄の運行
 利用者が必要とする発着時刻、系統・路線、方面、のりば、乗換、運賃などを、取得できた項目から示す。検索条件と日付、取得日時が返されていればその日時も添える。運行記事の作成日時と情報の取得日時は区別する。
 
 地下鉄の次発は時刻表に基づく予定列車として案内する。市バスの接近情報は取得した現在位置と通過履歴として案内し、履歴だけなら「現在位置情報なし」と明記する。履歴から現在位置、到着予測、遅延分、GPS座標を推定しない。
+
+料金検索は利用可能な料金経路をすべて返すため、先頭や最安を最短・推奨経路と解釈しない。定期券料金から購入資格を判定しない。券種候補が不完全な場合の指定は `nkotsu docs show pass` で確認する。
+
+延着証明書は現在の遅延情報ではない。証明書が古い・0件であることから現在の平常運行や遅延時間を推測せず、現在状態は `status` で確認する。
 
 ## 実行例
 

@@ -6,8 +6,10 @@ use crate::{
 use serde::{Deserialize, Deserializer};
 use unicode_normalization::UnicodeNormalization;
 pub mod bus;
+pub mod delay_cert;
 pub mod route;
 pub mod subway;
+pub mod teiki;
 
 #[derive(Deserialize)]
 #[serde(untagged)]

@@ -1,8 +1,8 @@
 # CLI動作仕様
 
-## 初期リリースの対象
+## 対象コマンド
 
-実装言語はRust、Cargo packageは `nagoya-kotsu-cli`、バイナリ名は `nkotsu` とする。v0.1.0は `status`、`bus stop`、`bus timetable`、`bus live`、`subway timetable`、`subway next`、`route` を対象とし、`fare`、`pass`、`delay` は次の段階で追加する。
+実装言語はRust、Cargo packageは `nagoya-kotsu-cli`、バイナリ名は `nkotsu` とする。v0.2.0は `status`、`bus stop`、`bus timetable`、`bus live`、`subway timetable`、`subway next`、`route`、`fare`、`pass`、`delay-cert` を対象とする。v0.1.0の既存コマンド・JSON構造・終了コードは維持する。新機能の仕様は [普通運賃](cli/fare.md)、[定期券料金](cli/pass.md)、[延着証明書](cli/delay-cert.md) に記録している。
 
 ## 設計上の決定
 
@@ -38,13 +38,13 @@
 
 ## 内蔵ドキュメント
 
-`docs list` と `docs show <name>` を追加し、`bus`、`subway`、`route`、`output`、`troubleshooting` の文書をバイナリへ埋め込む。インストール後はCLI単体で参照できる。開発Agent向けの `AGENTS.md` と `docs/agents/` の役割は変更しない。
+`docs list` と `docs show <name>` を追加し、`bus`、`subway`、`route`、`fare`、`pass`、`delay-cert`、`output`、`troubleshooting` の8文書をバイナリへ埋め込む。インストール後はCLI単体で参照できる。開発Agent向けの `AGENTS.md` と `docs/agents/` の役割は変更しない。
 
 通常の `docs list` は名前と概要、`docs show` はMarkdown本文をstdoutへ出力する。`--json` は既存Envelopeを使い、`list` の `data` は名前・概要の一覧、`show` の `data` は名前・概要・Markdown本文とする。API本文を取得しないため、`docs --raw` は `invalid_arguments`、終了コード2で拒否する。
 
 文書名は上記の名前の完全一致で選択し、未知の名前は `not_found`、終了コード3で利用可能な名前を案内する。文書の参照ではAPI・永続キャッシュを利用しない。トップレベルのhelpには `nkotsu docs list` と `nkotsu docs show <name>` の案内を追加する。
 
-既存の交通情報のDomain Modelと `--raw` の形式は維持する。`--format`、MCP、Agent Skill、全文検索、JSON Schema生成は追加しない。
+既存の交通情報のDomain Modelと `--raw` の形式は維持する。`--format`、MCP、全文検索、JSON Schema生成は追加しない。CLI利用者向けSkillは既存のhelp・内蔵docsへ誘導する。
 
 ## Help表示
 

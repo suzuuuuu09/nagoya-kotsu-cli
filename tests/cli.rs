@@ -2,6 +2,694 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::process::Command;
 
+fn teiki_response(request: &str) -> Response {
+    Response::json(if request.contains("/teiki/station.json") {
+        r#"{"021":"藤が丘","007":"名古屋","008":"Ｆ駅"}"#
+    } else if request.contains("/teiki/ends/021.json") {
+        r#"{"007":184467440737095516160}"#
+    } else if request.contains("/teiki/ends/008.json") {
+        r#"{"007":"184467440737095516160"}"#
+    } else if request.contains("/teiki/route/184467440737095516160.json") {
+        r#"{"A迂回":{"FARE":340,"TEIKI":81,"DISTANCE":199},"B直通":{"FARE":310,"TEIKI":80},"C迂回":{"FARE":340,"TEIKI":81}}"#
+    } else if request.contains("/teiki/teiki/81.json") {
+        r#"{"大学生":{"1":6440,"3":18360,"6":34780},"通勤":{"1":12060,"3":34380,"6":65130}}"#
+    } else if request.contains("/teiki/teiki/80.json") {
+        r#"{"大学生":{"1":6200,"3":17670,"6":33480}}"#
+    } else if request.contains("/teiki/use_shi_bus.json") {
+        r#"{"81":21}"#
+    } else if request.contains("/teiki/teiki/21.json") {
+        r#"{"大学生":{"1":9480,"3":27000,"6":51160}}"#
+    } else {
+        panic!("unexpected request: {request}")
+    })
+}
+
+#[test]
+fn fare_returns_all_named_routes_from_its_own_station_master() {
+    let server = Server::new(teiki_response);
+    let out = server.run(&["fare", " 藤が丘 ", "名古屋", "--json", "--no-cache"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        v,
+        serde_json::json!({
+            "schema_version":1,"complete":true,"errors":[],
+            "data":{"from":"藤が丘","to":"名古屋","routes":[
+                {"name":"A迂回","fare_yen":340},
+                {"name":"B直通","fare_yen":310},
+                {"name":"C迂回","fare_yen":340}
+            ]}
+        })
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+}
+
+#[test]
+fn pass_keeps_all_routes_and_filters_dynamic_types_and_months() {
+    let server = Server::new(teiki_response);
+    let out = server.run(&[
+        "pass",
+        "藤が丘",
+        "名古屋",
+        "--type",
+        "大学",
+        "--months",
+        "1",
+        "--json",
+        "--no-cache",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["complete"], true);
+    assert_eq!(
+        v["data"]["routes"],
+        serde_json::json!([
+            {"name":"A迂回","types":[{"name":"大学生","prices":[{"months":1,"yen":6440}]}]},
+            {"name":"B直通","types":[{"name":"大学生","prices":[{"months":1,"yen":6200}]}]},
+            {"name":"C迂回","types":[{"name":"大学生","prices":[{"months":1,"yen":6440}]}]}
+        ])
+    );
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.contains("/teiki/teiki/81.json"))
+            .count(),
+        1
+    );
+    assert_eq!(requests.len(), 5);
+}
+
+#[test]
+fn delay_cert_sorts_target_datetimes_and_keeps_delay_text_and_urls() {
+    let server = Server::new(|request| {
+        assert!(request.contains("/datas/traffic_delay_certificate.json"));
+        Response::json(
+            r#"[
+            {"delay_id":"old","rosen_name":"東山線","sort_no":1,"delay_datetime":"2026-09-08T00:00:00","title":"始発から","max_delay_time":"60分以上"},
+            {"delay_id":"later","rosen_name":"名城線・名港線","sort_no":0,"delay_datetime":"2026-09-15T00:00:00","title":"午後","max_delay_time":"10分"}
+        ]"#,
+        )
+    });
+    let out = server.run(&["delay-cert", "--json", "--no-cache"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["schema_version"], 1);
+    assert_eq!(v["complete"], true);
+    assert!(
+        v["data"]["fetched_at"]
+            .as_str()
+            .unwrap()
+            .ends_with("+09:00")
+    );
+    assert_eq!(
+        v["data"]["certificates"],
+        serde_json::json!([
+            {"line":"名城線・名港線","date":"2026-09-15","title":"午後","max_delay_time":"10分","url":"https://www.kotsu.city.nagoya.jp/rp/subway/delay_certificate.html?delay_id=later"},
+            {"line":"東山線","date":"2026-09-08","title":"始発から","max_delay_time":"60分以上","url":"https://www.kotsu.city.nagoya.jp/rp/subway/delay_certificate.html?delay_id=old"}
+        ])
+    );
+}
+
+#[test]
+fn fare_resolves_nfkc_names_and_route_filters_without_choosing_ambiguous_routes() {
+    let server = Server::new(teiki_response);
+    let out = server.run(&[
+        "fare",
+        " F駅 ",
+        "名古屋",
+        "--route",
+        "Ｂ直通",
+        "--json",
+        "--no-cache",
+    ]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["data"]["from"], "Ｆ駅");
+    assert_eq!(
+        v["data"]["routes"],
+        serde_json::json!([{"name":"B直通","fare_yen":310}])
+    );
+    for (from, to, route, code) in [
+        ("藤が丘", "名古屋", "迂回", "ambiguous"),
+        ("藤が丘", "名古屋", "存在しない", "not_found"),
+        ("存在しない", "名古屋", "B直通", "not_found"),
+        ("藤が丘", "存在しない", "B直通", "not_found"),
+    ] {
+        let out = server.run(&["fare", from, to, "--route", route, "--json", "--no-cache"]);
+        assert_eq!(out.status.code(), Some(3));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(v["data"].is_null());
+        assert_eq!(v["errors"][0]["code"], code);
+    }
+}
+
+#[test]
+fn fare_keeps_unknown_prices_as_partial_results_and_preserves_raw_bodies() {
+    let body = "\u{feff}{\n\"有効\":{\"FARE\":310},\"欠落\":{},\"不正\":{\"FARE\":-1}}\n";
+    let server = Server::new(move |request| {
+        if request.contains("/teiki/route/") {
+            Response::json(body)
+        } else {
+            teiki_response(request)
+        }
+    });
+    let out = server.run(&[
+        "fare",
+        "藤が丘",
+        "名古屋",
+        "--json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    assert_eq!(out.status.code(), Some(5));
+    assert!(!out.stderr.is_empty());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["complete"], false);
+    assert_eq!(v["data"]["routes"].as_array().unwrap().len(), 3);
+    assert!(v["data"]["routes"][0]["fare_yen"].is_null());
+    assert_eq!(v["data"]["routes"][1]["fare_yen"], 310);
+    assert!(v["data"]["routes"][2]["fare_yen"].is_null());
+    assert_eq!(v["errors"].as_array().unwrap().len(), 2);
+    let out = server.run(&["fare", "藤が丘", "名古屋", "--raw", "--no-cache"]);
+    assert_eq!(out.status.code(), Some(5));
+    let raw: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(raw.as_object().unwrap().len(), 3);
+    assert_eq!(
+        raw[format!(
+            "{}/STATION_DATA/teiki/route/184467440737095516160.json",
+            server.url
+        )],
+        body
+    );
+}
+
+#[test]
+fn fare_and_pass_valid_stations_without_a_connection_are_successful_empty_results() {
+    let server = Server::new(teiki_response);
+    for command in ["fare", "pass"] {
+        let out = server.run(&[command, "藤が丘", "藤が丘", "--json", "--no-cache"]);
+        assert!(out.status.success());
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["complete"], true);
+        assert_eq!(v["data"]["routes"], serde_json::json!([]));
+    }
+    assert_eq!(server.requests.lock().unwrap().len(), 4);
+    let server = Server::new(|request| {
+        if request.contains("/teiki/route/") {
+            Response::json("{}")
+        } else {
+            teiki_response(request)
+        }
+    });
+    let out = server.run(&["fare", "藤が丘", "名古屋", "--no-cache"]);
+    assert!(out.status.success());
+    assert!(
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .contains("該当する運賃経路はありません")
+    );
+}
+
+#[test]
+fn fare_reuses_and_revalidates_static_cache_and_no_cache_disables_it() {
+    let revalidate = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let state = revalidate.clone();
+    let server = Server::new(move |request| {
+        let mut response = teiki_response(request).header("ETag: \"fare-v1\"\r\n");
+        if state.load(std::sync::atomic::Ordering::Relaxed) {
+            assert!(
+                request
+                    .to_lowercase()
+                    .contains("if-none-match: \"fare-v1\"")
+            );
+            response.status = 304;
+            response.body.clear();
+        }
+        response
+    });
+    let cache = std::env::temp_dir().join(format!("nkotsu-fare-cache-{}", std::process::id()));
+    let run = |flags: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+            .env("NKOTSU_BASE_URL", &server.url)
+            .env("NKOTSU_CACHE_DIR", &cache)
+            .args(["fare", "藤が丘", "名古屋", "--json"])
+            .args(flags)
+            .output()
+            .unwrap()
+    };
+    assert!(run(&[]).status.success());
+    assert!(run(&[]).status.success());
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+    revalidate.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(run(&["--refresh"]).status.success());
+    assert_eq!(server.requests.lock().unwrap().len(), 6);
+    revalidate.store(false, std::sync::atomic::Ordering::Relaxed);
+    assert!(run(&["--no-cache"]).status.success());
+    assert_eq!(server.requests.lock().unwrap().len(), 9);
+    for entry in std::fs::read_dir(&cache).unwrap() {
+        std::fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    std::fs::remove_dir(cache).unwrap();
+}
+
+#[test]
+fn pass_lists_types_and_prices_and_resolves_type_once_across_routes() {
+    let server = Server::new(teiki_response);
+    let out = server.run(&["pass", "藤が丘", "名古屋", "--json", "--no-cache"]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["data"]["routes"][0]["types"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        v["data"]["routes"][0]["types"][0]["prices"],
+        serde_json::json!([
+            {"months":1,"yen":6440},{"months":3,"yen":18360},{"months":6,"yen":34780}
+        ])
+    );
+    for (months, yen) in [("1", 6440), ("3", 18360), ("6", 34780)] {
+        let out = server.run(&[
+            "pass",
+            "藤が丘",
+            "名古屋",
+            "--route",
+            "Ａ迂回",
+            "--type",
+            "大学生",
+            "--months",
+            months,
+            "--json",
+            "--no-cache",
+        ]);
+        assert!(out.status.success());
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["data"]["routes"].as_array().unwrap().len(), 1);
+        assert_eq!(v["data"]["routes"][0]["types"][0]["prices"][0]["yen"], yen);
+        assert_eq!(
+            v["data"]["routes"][0]["types"][0]["prices"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    let server = Server::new(|request| {
+        if request.contains("/teiki/teiki/80.json") {
+            Response::json(r#"{"大学院生":{"1":6000,"3":16000,"6":30000}}"#)
+        } else {
+            teiki_response(request)
+        }
+    });
+    for (input, code) in [("大学", "ambiguous"), ("未登録", "not_found")] {
+        let out = server.run(&[
+            "pass",
+            "藤が丘",
+            "名古屋",
+            "--type",
+            input,
+            "--json",
+            "--no-cache",
+        ]);
+        assert_eq!(out.status.code(), Some(3));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["errors"][0]["code"], code);
+        assert!(v["data"].is_null());
+    }
+}
+
+#[test]
+fn pass_partial_fetch_keeps_routes_and_requires_exact_type_when_candidates_are_missing() {
+    let server = Server::new(|request| {
+        let mut response = teiki_response(request);
+        if request.contains("/teiki/teiki/81.json") {
+            response.status = 400;
+        }
+        response
+    });
+    for input in [None, Some("大学生"), Some("大学"), Some("未登録")] {
+        let mut args = vec![
+            "pass",
+            "藤が丘",
+            "名古屋",
+            "--json",
+            "--quiet",
+            "--no-cache",
+        ];
+        if let Some(input) = input {
+            args.extend(["--type", input]);
+        }
+        let out = server.run(&args);
+        assert_eq!(out.status.code(), Some(4));
+        assert!(!out.stderr.is_empty());
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["complete"], false);
+        assert_eq!(v["data"]["routes"].as_array().unwrap().len(), 3);
+        assert_eq!(v["data"]["routes"][0]["types"], serde_json::json!([]));
+        assert_eq!(v["data"]["routes"][2]["types"], serde_json::json!([]));
+        if input.is_none() || input == Some("大学生") {
+            assert_eq!(v["data"]["routes"][1]["types"][0]["prices"][0]["yen"], 6200);
+        } else {
+            assert_eq!(v["data"]["routes"][1]["types"], serde_json::json!([]));
+        }
+        assert_eq!(v["errors"].as_array().unwrap().len(), 2);
+        assert!(
+            v["errors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e["code"] == "http_error")
+        );
+    }
+    assert_eq!(
+        server
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.contains("/teiki/teiki/81.json"))
+            .count(),
+        4
+    );
+    let server = Server::new(|request| {
+        let mut response = teiki_response(request);
+        if request.contains("/teiki/teiki/") {
+            response.status = 400;
+        }
+        response
+    });
+    let out = server.run(&["pass", "藤が丘", "名古屋", "--json", "--no-cache"]);
+    assert_eq!(out.status.code(), Some(4));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["data"]["routes"].as_array().unwrap().len(), 3);
+    assert!(
+        v["data"]["routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["types"] == serde_json::json!([]))
+    );
+}
+
+#[test]
+fn pass_with_bus_uses_mapped_class_and_does_not_fallback_for_missing_mapping() {
+    let server = Server::new(teiki_response);
+    let out = server.run(&[
+        "pass",
+        "藤が丘",
+        "名古屋",
+        "--with-bus",
+        "--json",
+        "--no-cache",
+    ]);
+    assert_eq!(out.status.code(), Some(3));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["complete"], false);
+    assert_eq!(v["data"]["routes"][0]["types"][0]["prices"][0]["yen"], 9480);
+    assert_eq!(v["data"]["routes"][1]["types"], serde_json::json!([]));
+    assert_eq!(v["data"]["routes"][2]["types"][0]["prices"][0]["yen"], 9480);
+    assert_eq!(v["errors"][0]["code"], "not_found");
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 5);
+    assert!(
+        !requests
+            .iter()
+            .any(|r| r.contains("/teiki/teiki/80.json") || r.contains("/teiki/teiki/81.json"))
+    );
+    drop(requests);
+    let out = server.run(&[
+        "pass",
+        "藤が丘",
+        "名古屋",
+        "--with-bus",
+        "--raw",
+        "--no-cache",
+    ]);
+    let raw: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(raw.as_object().unwrap().len(), 5);
+    assert!(raw[format!("{}/STATION_DATA/teiki/use_shi_bus.json", server.url)].is_string());
+    let server = Server::new(|request| {
+        if request.contains("use_shi_bus") {
+            Response::json("{}")
+        } else {
+            teiki_response(request)
+        }
+    });
+    let out = server.run(&[
+        "pass",
+        "藤が丘",
+        "名古屋",
+        "--with-bus",
+        "--json",
+        "--no-cache",
+    ]);
+    assert_eq!(out.status.code(), Some(3));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["data"]["routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["types"] == serde_json::json!([]))
+    );
+    assert_eq!(server.requests.lock().unwrap().len(), 4);
+}
+
+#[test]
+fn pass_keeps_valid_periods_when_another_price_is_invalid_and_supports_new_type_names() {
+    let server = Server::new(|request| {
+        if request.contains("/teiki/teiki/81.json") {
+            Response::json(r#"{"研究生":{"1":6440,"3":18360,"6":"不正"},"不明券種":null}"#)
+        } else {
+            teiki_response(request)
+        }
+    });
+    let out = server.run(&[
+        "pass",
+        "藤が丘",
+        "名古屋",
+        "--route",
+        "A迂回",
+        "--type",
+        "研究",
+        "--json",
+        "--no-cache",
+    ]);
+    assert_eq!(out.status.code(), Some(5));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        v["data"]["routes"][0]["types"],
+        serde_json::json!([
+            {"name":"研究生","prices":[{"months":1,"yen":6440},{"months":3,"yen":18360}]}
+        ])
+    );
+    assert_eq!(v["errors"].as_array().unwrap().len(), 2);
+    let out = server.run(&[
+        "pass",
+        "藤が丘",
+        "名古屋",
+        "--route",
+        "A迂回",
+        "--json",
+        "--no-cache",
+    ]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        v["data"]["routes"][0]["types"][0],
+        serde_json::json!({"name":"不明券種","prices":[]})
+    );
+}
+
+#[test]
+fn pass_human_warns_about_eligibility_but_quiet_keeps_prices_and_json_has_no_qualification() {
+    let server = Server::new(teiki_response);
+    for quiet in [false, true] {
+        let mut args = vec!["pass", "藤が丘", "名古屋", "--route", "A迂回", "--no-cache"];
+        if quiet {
+            args.push("--quiet");
+        }
+        let out = server.run(&args);
+        assert!(out.status.success());
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(text.contains("6440円") && text.contains("大学生"));
+        assert_eq!(text.contains("購入資格を保証しません"), !quiet);
+    }
+    let out = server.run(&["pass", "藤が丘", "名古屋", "--json", "--no-cache"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(!text.contains("eligible") && !text.contains("購入資格"));
+}
+
+#[test]
+fn delay_cert_filters_before_limit_and_known_lines_without_certificates_are_successful() {
+    let server = Server::new(|_| {
+        Response::json(
+            r#"[
+        {"delay_id":"1","rosen_name":"東山線","delay_datetime":"2026-09-08T01:00:00","title":"古い","max_delay_time":"60分以上"},
+        {"delay_id":"2","rosen_name":"名城線・名港線","delay_datetime":"2026-09-15T00:00:00","title":"別路線","max_delay_time":"10分"},
+        {"delay_id":"3","rosen_name":"東山線","delay_datetime":"2026-09-08T18:00:00","title":"同日の新しい証明書","max_delay_time":"15分"}
+    ]"#,
+        )
+    });
+    let out = server.run(&[
+        "delay-cert",
+        "--line",
+        "東山",
+        "--date",
+        "2026-09-08",
+        "--limit",
+        "1",
+        "--json",
+    ]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["data"]["certificates"].as_array().unwrap().len(), 1);
+    assert_eq!(v["data"]["certificates"][0]["title"], "同日の新しい証明書");
+    for line in ["名城線", "名港線"] {
+        let out = server.run(&["delay-cert", "--line", line, "--json"]);
+        assert!(out.status.success());
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["data"]["certificates"].as_array().unwrap().len(), 1);
+        assert_eq!(v["data"]["certificates"][0]["line"], "名城線・名港線");
+    }
+    let out = server.run(&["delay-cert", "--line", "鶴舞線", "--json"]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["complete"], true);
+    assert_eq!(v["data"]["certificates"], serde_json::json!([]));
+    for (line, code) in [("存在しない", "not_found"), ("線", "ambiguous")] {
+        let out = server.run(&["delay-cert", "--line", line, "--json"]);
+        assert_eq!(out.status.code(), Some(3));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["errors"][0]["code"], code);
+    }
+    let server = Server::new(|_| Response::json("[]"));
+    let out = server.run(&["delay-cert", "--line", "東山線"]);
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("該当する延着証明書はありません"));
+    assert!(
+        !text.contains("平常運行")
+            && !text.contains("正常運行")
+            && !text.contains("遅延していません")
+    );
+}
+
+#[test]
+fn delay_cert_invalid_dates_are_partial_even_when_all_certificates_are_invalid() {
+    for date in ["not-a-date", "2026-02-30T00:00:00", ""] {
+        let body = serde_json::json!([
+            {"delay_id":"bad","rosen_name":"東山線","delay_datetime":date,"title":"不正","max_delay_time":"60分以上"},
+            {"delay_id":"good","rosen_name":"東山線","delay_datetime":"2026-09-08T00:00:00","title":"有効","max_delay_time":"15分"}
+        ]).to_string();
+        let server = Server::new(move |_| Response::json(body.clone()));
+        let out = server.run(&["delay-cert", "--json", "--quiet"]);
+        assert_eq!(out.status.code(), Some(5));
+        assert!(!out.stderr.is_empty());
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["complete"], false);
+        assert_eq!(v["data"]["certificates"].as_array().unwrap().len(), 1);
+        assert_eq!(v["data"]["certificates"][0]["title"], "有効");
+        assert_eq!(v["errors"][0]["scope"], "delay-cert.certificates.0");
+    }
+    let server = Server::new(|_| {
+        Response::json(
+            r#"[{"delay_id":"bad","rosen_name":"東山線","title":"日時なし","max_delay_time":"60分以上"}]"#,
+        )
+    });
+    let out = server.run(&["delay-cert", "--json"]);
+    assert_eq!(out.status.code(), Some(5));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["data"]["certificates"], serde_json::json!([]));
+    assert_eq!(v["complete"], false);
+    assert_eq!(v["errors"][0]["code"], "invalid_response");
+}
+
+#[test]
+fn delay_cert_never_persistently_caches_and_raw_keeps_the_original_body() {
+    let body = "\u{feff}[\n{\"delay_id\":\"a&b\",\"rosen_name\":\"東山線\",\"delay_datetime\":\"2026-09-08T00:00:00\",\"title\":\"案内\",\"max_delay_time\":\"60分以上\"}\n]\n";
+    let server =
+        Server::new(move |_| Response::json(body).header("Cache-Control: max-age=86400\r\n"));
+    let cache = std::env::temp_dir().join(format!("nkotsu-delay-cache-{}", std::process::id()));
+    for _ in 0..2 {
+        let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+            .env("NKOTSU_BASE_URL", &server.url)
+            .env("NKOTSU_CACHE_DIR", &cache)
+            .args(["delay-cert", "--json"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(
+            v["data"]["certificates"][0]["url"]
+                .as_str()
+                .unwrap()
+                .ends_with("delay_id=a%26b")
+        );
+    }
+    assert_eq!(server.requests.lock().unwrap().len(), 2);
+    assert!(!cache.exists());
+    let out = server.run(&["delay-cert", "--raw"]);
+    assert!(out.status.success());
+    let raw: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        raw[format!("{}/datas/traffic_delay_certificate.json", server.url)],
+        body
+    );
+}
+
+#[test]
+fn new_commands_reject_invalid_arguments_and_report_upstream_failures() {
+    let server = Server::new(|_| panic!("invalid arguments must not fetch"));
+    for args in [
+        vec!["pass", "藤が丘", "名古屋", "--months", "2", "--json"],
+        vec!["delay-cert", "--limit", "0", "--json"],
+        vec!["delay-cert", "--date", "2026-02-30", "--json"],
+        vec!["delay-cert", "--date", "2026-9-8", "--json"],
+    ] {
+        let out = server.run(&args);
+        assert_eq!(out.status.code(), Some(2));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["errors"][0]["code"], "invalid_arguments");
+    }
+    let server = Server::new(|_| Response {
+        status: 400,
+        mime: "application/json",
+        body: "{}".into(),
+        headers: String::new(),
+    });
+    for args in [
+        vec!["fare", "藤が丘", "名古屋", "--json", "--no-cache"],
+        vec!["pass", "藤が丘", "名古屋", "--json", "--no-cache"],
+        vec!["delay-cert", "--json"],
+    ] {
+        let out = server.run(&args);
+        assert_eq!(out.status.code(), Some(4));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(v["data"].is_null());
+        assert_eq!(v["errors"][0]["code"], "http_error");
+    }
+    let server = Server::new(|_| Response::json("null"));
+    for args in [
+        vec!["fare", "藤が丘", "名古屋", "--json", "--no-cache"],
+        vec!["delay-cert", "--json"],
+    ] {
+        let out = server.run(&args);
+        assert_eq!(out.status.code(), Some(5));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(v["data"].is_null());
+    }
+}
+
 #[test]
 fn status_keeps_duplicate_line_articles_and_accepts_bom() {
     let server = Server::new(|_| {
@@ -93,7 +781,16 @@ fn embedded_docs_work_without_network_or_cache() {
         .collect();
     assert_eq!(
         names,
-        ["bus", "subway", "route", "output", "troubleshooting"]
+        [
+            "bus",
+            "subway",
+            "route",
+            "fare",
+            "pass",
+            "delay-cert",
+            "output",
+            "troubleshooting"
+        ]
     );
     for name in names {
         let out = server.run(&["docs", "show", name, "--json"]);
@@ -177,6 +874,35 @@ fn help_explains_purpose_examples_constraints_and_docs() {
                 "nkotsu docs show route",
             ],
         ),
+        (
+            vec!["fare", "--help"],
+            vec![
+                "複数",
+                "最初の経路を最短",
+                "--route <ROUTE>",
+                "nkotsu docs show fare",
+            ],
+        ),
+        (
+            vec!["pass", "--help"],
+            vec![
+                "購入資格を判定しません",
+                "--type <TYPE>",
+                "--months <MONTHS>",
+                "--with-bus",
+                "nkotsu docs show pass",
+            ],
+        ),
+        (
+            vec!["delay-cert", "--help"],
+            vec![
+                "現在の遅延状況ではありません。",
+                "--line <LINE>",
+                "--date <YYYY-MM-DD>",
+                "--limit <N>",
+                "nkotsu docs show delay-cert",
+            ],
+        ),
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
             .args(args)
@@ -198,6 +924,9 @@ fn help_explains_purpose_examples_constraints_and_docs() {
         vec!["docs"],
         vec!["docs", "list"],
         vec!["docs", "show"],
+        vec!["fare"],
+        vec!["pass"],
+        vec!["delay-cert"],
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
             .args(command)
