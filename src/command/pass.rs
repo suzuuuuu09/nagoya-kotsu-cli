@@ -52,6 +52,7 @@ pub async fn run(client: &ApiClient, options: &Pass) -> Result<ResultData, Error
         &options.fare.from,
         &options.fare.to,
         options.fare.route.as_deref(),
+        "pass",
     )
     .await?;
     let mut result = ResultData::new(Data::Empty);

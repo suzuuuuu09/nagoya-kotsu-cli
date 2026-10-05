@@ -21,7 +21,7 @@ const DOCUMENTS: [Document; 9] = [
     },
     Document {
         name: "subway",
-        summary: "地下鉄の時刻表・予定列車",
+        summary: "地下鉄の駅情報・時刻表・予定列車",
         content: Some(include_str!("../docs/cli/subway.md")),
     },
     Document {

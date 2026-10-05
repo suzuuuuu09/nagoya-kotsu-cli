@@ -6,8 +6,12 @@ use crate::{
     model::{Data, ResultData, Timetable},
 };
 pub async fn run(client: &ApiClient, command: &Subway) -> Result<ResultData, Error> {
+    if let Subway::Station { station } = command {
+        return super::places::station(client, station).await;
+    }
     let now = crate::time::now();
     let (input, filter, after, limit, next) = match command {
+        Subway::Station { .. } => unreachable!(),
         Subway::Timetable {
             station,
             filter,

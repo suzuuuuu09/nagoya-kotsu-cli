@@ -40,7 +40,7 @@ pub enum Data {
     Fare(FareResult),
     Pass(PassResult),
     DelayCertificates(DelayCertificates),
-    Location(PlaceLocation),
+    Coordinates(PlaceLocation),
     Nearby(NearbyResult),
     Search(SearchResult),
     Station(StationInfo),
@@ -59,6 +59,7 @@ pub struct PlaceLocation {
 #[derive(Debug, Serialize)]
 pub struct NearbyResult {
     pub origin: PlaceLocation,
+    pub matched_count: usize,
     pub places: Vec<NearbyPlace>,
 }
 #[derive(Debug, Serialize)]
@@ -71,7 +72,7 @@ pub struct NearbyPlace {
 #[derive(Debug, Serialize)]
 pub struct SearchResult {
     pub query: String,
-    pub total: usize,
+    pub retrieved_count: usize,
     pub results: Vec<SearchPlace>,
 }
 #[derive(Debug, Serialize)]
@@ -81,7 +82,7 @@ pub struct SearchPlace {
     #[serde(rename = "type")]
     pub kind: String,
     pub codes: Vec<String>,
-    pub lines: Vec<String>,
+    pub reported_lines: Vec<String>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
 }

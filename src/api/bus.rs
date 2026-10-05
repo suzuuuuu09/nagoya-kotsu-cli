@@ -43,8 +43,11 @@ pub async fn names(client: &ApiClient) -> Result<Vec<Place>, Error> {
         .collect())
 }
 pub async fn stop(client: &ApiClient, input: &str) -> Result<Stop, Error> {
+    let input = super::place::checked_input(input, Some(crate::cli::PlaceType::Bus))?;
     let names = names(client).await?;
-    let index = choose(input, &names, |p| p.name.clone())?;
+    let index = super::place::choose(&input, crate::cli::PlaceType::Bus, &names, |p| {
+        p.name.clone()
+    })?;
     let place = &names[index];
     let response: StopResponse = client
         .json(

@@ -1,11 +1,13 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+const PLACE_INPUT: &str = "施設名または完全修飾名（駅記号は表示用で、地点指定には使えません）";
+
 #[derive(Debug, Parser)]
 #[command(
     name = "nkotsu",
     version,
     about = "名古屋市交通局の市バス・地下鉄情報を取得するCLI",
-    after_help = "Examples:\n  nkotsu status\n  nkotsu bus live 上社\n  nkotsu subway next 藤が丘\n  nkotsu route 藤が丘 名古屋 --subway\n  nkotsu route 藤が丘 名古屋 --subway --json\n  nkotsu fare 藤が丘 名古屋\n  nkotsu pass 藤が丘 名古屋 --type 大学生 --months 1\n  nkotsu delay-cert --line 東山線\n  nkotsu search 藤が丘\n  nkotsu station 藤が丘\n  nkotsu location '藤が丘(名古屋市地下鉄)'\n  nkotsu nearby 藤が丘 --origin-type subway\n\nNotes:\n  --json と --raw は同時指定できません。エラー・警告・診断はstderrへ出します。\n\nDetailed documentation:\n  nkotsu docs list\n  nkotsu docs show <name>",
+    after_help = "Examples:\n  nkotsu status\n  nkotsu bus live 上社\n  nkotsu subway next 藤が丘\n  nkotsu route 藤が丘 名古屋 --subway\n  nkotsu route 藤が丘 名古屋 --subway --json\n  nkotsu fare 藤が丘 名古屋\n  nkotsu pass 藤が丘 名古屋 --type 大学生 --months 1\n  nkotsu delay-cert --line 東山線\n  nkotsu search 藤が丘\n  nkotsu subway station 藤が丘\n  nkotsu coordinates '藤が丘(名古屋市地下鉄)'\n  nkotsu nearby 藤が丘 --origin-type subway\n\nNotes:\n  --json と --raw は同時指定できません。エラー・警告・診断はstderrへ出します。\n\nDetailed documentation:\n  nkotsu docs list\n  nkotsu docs show <name>",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -86,9 +88,9 @@ pub enum Command {
         command: Bus,
     },
     #[command(
-        about = "地下鉄の時刻表・次発列車",
-        long_about = "地下鉄の時刻表と、時刻表から算出した次発の予定列車を取得します。",
-        after_help = "Examples:\n  nkotsu subway timetable 藤が丘\n  nkotsu subway next 藤が丘 --limit 3\n\nNotes:\n  次発はリアルタイムの列車位置ではありません。\n\nMore:\n  nkotsu docs show subway"
+        about = "地下鉄の駅情報・時刻表・次発列車",
+        long_about = "地下鉄駅の基本情報・時刻表と、時刻表から算出した次発の予定列車を取得します。",
+        after_help = "Examples:\n  nkotsu subway timetable 藤が丘\n  nkotsu subway next 藤が丘 --limit 3\n  nkotsu subway station 藤が丘\n\nNotes:\n  次発はリアルタイムの列車位置ではありません。\n\nMore:\n  nkotsu docs show subway"
     )]
     Subway {
         #[command(subcommand)]
@@ -97,7 +99,7 @@ pub enum Command {
     #[command(
         about = "出発地から到着地までの経路を検索",
         long_about = "出発地から到着地までの経路を検索します。交通手段・経由地・検索時刻を指定できます。",
-        after_help = "Examples:\n  nkotsu route 藤が丘 名古屋 --subway\n  nkotsu route 藤が丘 名古屋 --subway --at 09:00\n  nkotsu route 藤が丘 名古屋 --subway --at 18:00 --arrive\n  nkotsu route 藤が丘 名古屋 --subway --via 栄\n  nkotsu route 藤が丘 名古屋 --subway --json\n\nNotes:\n  --at HH:MM は日本時間の今日として扱い、過去時刻でも翌日へ繰り越しません。\n  同名の交通施設は自動選択しません。交通手段指定は地点候補と乗車区間の両方に適用します。\n  --bus だけなら市バスのみ、--subway だけなら地下鉄のみ。無指定・両方指定では両方を対象にします。\n\nMore:\n  nkotsu docs show route"
+        after_help = "Examples:\n  nkotsu route '藤が丘(名古屋市地下鉄)' '名古屋(名古屋市地下鉄)' --subway\n  nkotsu route 藤が丘 名古屋 --subway --at 09:00\n  nkotsu route 藤が丘 名古屋 --subway --at 18:00 --arrive\n  nkotsu route 藤が丘 名古屋 --subway --via 栄\n  nkotsu route 藤が丘 名古屋 --subway --json\n\nNotes:\n  --at HH:MM は日本時間の今日として扱い、過去時刻でも翌日へ繰り越しません。\n  完全修飾名は施設を指定し、経路全体の交通手段を制限しません。地下鉄だけなら --subway を指定します。\n  同名の交通施設は自動選択しません。交通手段指定は地点候補と乗車区間の両方に適用します。\n  --bus だけなら市バスのみ、--subway だけなら地下鉄のみ。無指定・両方指定では両方を対象にします。\n\nMore:\n  nkotsu docs show route"
     )]
     Route(Route),
     #[command(
@@ -125,24 +127,15 @@ pub enum Command {
     )]
     Search(Search),
     #[command(
-        about = "地下鉄駅の基本情報を表示",
-        long_about = "地下鉄駅の名前・駅記号・代表座標を表示します。市バス停の詳細は bus stop を使用してください。",
-        after_help = "Examples:\n  nkotsu station 藤が丘\n  nkotsu station 名古屋 --json\n\nMore:\n  nkotsu docs show places"
-    )]
-    Station {
-        #[arg(help = "地下鉄駅名または完全修飾名", value_name = "STATION")]
-        station: String,
-    },
-    #[command(
         about = "駅・バス停の座標を表示",
         long_about = "交通局に登録された駅・バス停の代表座標を表示します。利用者や端末の現在位置を取得するコマンドではありません。",
-        after_help = "Examples:\n  nkotsu location '藤が丘(名古屋市地下鉄)'\n  nkotsu location 上社 --type bus --json\n\nMore:\n  nkotsu docs show places"
+        after_help = "Examples:\n  nkotsu coordinates '藤が丘(名古屋市地下鉄)'\n  nkotsu coordinates 上社 --type bus --json\n\nMore:\n  nkotsu docs show places"
     )]
-    Location(Location),
+    Coordinates(Coordinates),
     #[command(
         about = "周辺の駅・バス停を検索",
         long_about = "指定した交通施設を基準に周辺の駅・バス停を探します。距離は徒歩距離ではなく概算直線距離です。端末の現在位置は取得しません。",
-        after_help = "Examples:\n  nkotsu nearby '藤が丘(名古屋市地下鉄)'\n  nkotsu nearby 藤が丘 --origin-type subway --type bus\n  nkotsu nearby 栄 --origin-type subway --radius 500 --limit 5 --json\n\nMore:\n  nkotsu docs show places"
+        after_help = "Examples:\n  nkotsu nearby '藤が丘(名古屋市地下鉄)'\n  nkotsu nearby 藤が丘 --origin-type subway --result-type bus\n  nkotsu nearby 栄 --origin-type subway --radius 500 --limit 5 --json\n\nMore:\n  nkotsu docs show places"
     )]
     Nearby(Nearby),
     #[command(
@@ -187,13 +180,13 @@ impl PlaceType {
 }
 
 #[derive(Debug, Args)]
-pub struct Location {
-    #[arg(help = "駅・バス停名または完全修飾名", value_name = "PLACE")]
+pub struct Coordinates {
+    #[arg(help = PLACE_INPUT, value_name = "PLACE")]
     pub place: String,
     #[arg(
         long = "type",
         value_enum,
-        help = "地点種別で絞り込む",
+        help = "地点種別: bus（市バス）/ subway（地下鉄）",
         value_name = "TYPE"
     )]
     pub kind: Option<PlaceType>,
@@ -201,21 +194,41 @@ pub struct Location {
 
 #[derive(Debug, Args)]
 pub struct Nearby {
-    #[arg(help = "基準となる駅・バス停名または完全修飾名", value_name = "PLACE")]
+    #[arg(
+        help = "基準施設の名前または完全修飾名（駅記号は表示用）",
+        value_name = "PLACE"
+    )]
     pub place: String,
-    #[arg(long, value_enum, help = "基準地点の種別", value_name = "TYPE")]
+    #[arg(
+        long,
+        value_enum,
+        help = "基準施設の種別: bus（市バス）/ subway（地下鉄）",
+        value_name = "TYPE"
+    )]
     pub origin_type: Option<PlaceType>,
     #[arg(
-        long = "type",
+        long = "result-type",
         value_enum,
-        help = "検索結果の種別",
+        help = "探す施設の種別: bus（市バス）/ subway（地下鉄）",
         value_name = "TYPE"
     )]
     pub kind: Option<PlaceType>,
-    #[arg(long, help = "最大直線距離（メートル、1以上、省略時は制限なし）", value_name = "METERS", value_parser = clap::value_parser!(u32).range(1..))]
+    #[arg(long, help = "最大概算直線距離（メートル、1以上、既定1000m）", value_name = "METERS", value_parser = clap::value_parser!(u32).range(1..))]
     pub radius: Option<u32>,
+    #[arg(long, conflicts_with = "radius", help = "距離制限なしで近い順に検索")]
+    pub no_radius: bool,
     #[arg(long, help = "表示件数（1以上）", value_name = "N", default_value = "10", value_parser = clap::value_parser!(u32).range(1..))]
     pub limit: u32,
+}
+
+impl Nearby {
+    pub fn effective_radius(&self) -> Option<u32> {
+        if self.no_radius {
+            None
+        } else {
+            Some(self.radius.unwrap_or(1000))
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -225,7 +238,7 @@ pub struct Search {
     #[arg(
         long = "type",
         value_enum,
-        help = "検索する地点種別",
+        help = "検索する種別: bus（市バス）/ subway（地下鉄）",
         value_name = "TYPE"
     )]
     pub kind: Option<PlaceType>,
@@ -235,9 +248,9 @@ pub struct Search {
 
 #[derive(Debug, Args)]
 pub struct Fare {
-    #[arg(help = "出発駅名")]
+    #[arg(help = PLACE_INPUT)]
     pub from: String,
-    #[arg(help = "到着駅名")]
+    #[arg(help = PLACE_INPUT)]
     pub to: String,
     #[arg(long, help = "料金経路名で絞り込む", value_name = "ROUTE")]
     pub route: Option<String>,
@@ -282,7 +295,7 @@ pub enum Bus {
         after_help = "Examples:\n  nkotsu bus stop 上社\n  nkotsu bus stop 藤が丘 --json\n\nNotes:\n  名前が曖昧な場合は候補を表示し、自動選択しません。\n\nMore:\n  nkotsu docs show bus"
     )]
     Stop {
-        #[arg(help = "バス停名（例: 上社、藤が丘）")]
+        #[arg(help = PLACE_INPUT)]
         stop: String,
     },
     #[command(
@@ -291,7 +304,7 @@ pub enum Bus {
         after_help = "Examples:\n  nkotsu bus timetable 上社\n  nkotsu bus timetable 上社 --day weekday --after 14:00 --limit 10\n\nNotes:\n  自動の日種判定ができない場合は --day を指定してください。有効な条件で0件の場合も成功です。\n\nMore:\n  nkotsu docs show bus"
     )]
     Timetable {
-        #[arg(help = "バス停名（例: 上社、藤が丘）")]
+        #[arg(help = PLACE_INPUT)]
         stop: String,
         #[command(flatten)]
         filter: BusTimetable,
@@ -302,7 +315,7 @@ pub enum Bus {
         after_help = "Examples:\n  nkotsu bus live 上社\n  nkotsu bus live 上社 --route 上社12\n  nkotsu bus live 上社 --pole 4番\n  nkotsu bus live 上社 --route 上社12 --json\n\nNotes:\n  到着予測時刻・遅延分数・GPS座標を推定して表示しません。\n  現在位置が取得できない場合は「現在位置情報なし」と通過履歴を表示します。\n  通常は未通過・位置関係不明の車両が対象です。--all でも系統・のりばの絞り込みは維持します。\n\nMore:\n  nkotsu docs show bus"
     )]
     Live {
-        #[arg(help = "バス停名（例: 上社、藤が丘）")]
+        #[arg(help = PLACE_INPUT)]
         stop: String,
         #[arg(long, help = "系統名で絞り込み（例: 上社12）", value_name = "ROUTE")]
         route: Option<String>,
@@ -341,12 +354,22 @@ pub struct BusTimetable {
 #[derive(Debug, Subcommand)]
 pub enum Subway {
     #[command(
+        about = "地下鉄駅の基本情報を表示",
+        long_about = "地下鉄駅の名前・駅記号・代表座標を表示します。市バス停の詳細は bus stop を使用してください。",
+        after_help = "Examples:\n  nkotsu subway station 藤が丘\n  nkotsu subway station 名古屋 --json\n\nMore:\n  nkotsu docs show places"
+    )]
+    Station {
+        #[arg(help = PLACE_INPUT, value_name = "STATION")]
+        station: String,
+    },
+
+    #[command(
         about = "地下鉄駅の時刻表を表示",
         long_about = "指定した駅の予定時刻を表示します。営業日は04:00から翌04:00までで、00〜03時台は24〜27時台として扱います。",
         after_help = "Examples:\n  nkotsu subway timetable 藤が丘\n  nkotsu subway timetable 藤が丘 --day weekday --after 14:00 --limit 10\n\nNotes:\n  自動の日種判定ができない場合は --day を指定してください。有効な条件で0件の場合も成功です。\n\nMore:\n  nkotsu docs show subway"
     )]
     Timetable {
-        #[arg(help = "地下鉄駅名（例: 藤が丘、名古屋）")]
+        #[arg(help = PLACE_INPUT)]
         station: String,
         #[command(flatten)]
         filter: SubwayFilter,
@@ -361,7 +384,7 @@ pub enum Subway {
         after_help = "Examples:\n  nkotsu subway next 藤が丘\n  nkotsu subway next 藤が丘 --limit 3\n  nkotsu subway next 栄 --line 東山線 --direction 藤が丘方面\n\nNotes:\n  営業日は04:00で区切り、翌営業日まで検索します。--day の指定は最初の営業日だけに適用します。\n  自動の日種判定ができない場合は --day を指定してください。\n\nMore:\n  nkotsu docs show subway"
     )]
     Next {
-        #[arg(help = "地下鉄駅名（例: 藤が丘、名古屋）")]
+        #[arg(help = PLACE_INPUT)]
         station: String,
         #[command(flatten)]
         filter: SubwayFilter,
@@ -396,9 +419,9 @@ pub struct SubwayFilter {
 
 #[derive(Debug, Args)]
 pub struct Route {
-    #[arg(help = "出発地（例: 藤が丘）")]
+    #[arg(help = PLACE_INPUT)]
     pub from: String,
-    #[arg(help = "到着地（例: 名古屋）")]
+    #[arg(help = PLACE_INPUT)]
     pub to: String,
     #[arg(long, conflicts_with_all = ["first", "last"], value_name = "TIME", help = "検索時刻（HH:MM または YYYY-MM-DDTHH:MM）")]
     pub at: Option<String>,
@@ -408,7 +431,11 @@ pub struct Route {
     pub first: bool,
     #[arg(long, help = "終発を検索")]
     pub last: bool,
-    #[arg(long, help = "経由地を指定", value_name = "STATION")]
+    #[arg(
+        long,
+        help = "経由施設の名前または完全修飾名（駅記号は表示用）",
+        value_name = "STATION"
+    )]
     pub via: Option<String>,
     #[arg(long, help = "市バスのみを検索対象にする（--subway も指定すると両方）")]
     pub bus: bool,
@@ -447,7 +474,7 @@ pub enum Docs {
     )]
     Show {
         #[arg(
-            help = "文書名: bus / subway / route / fare / pass / delay-cert / output / troubleshooting"
+            help = "文書名: bus / subway / route / fare / pass / delay-cert / places / output / troubleshooting"
         )]
         name: String,
     },

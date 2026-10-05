@@ -2,7 +2,7 @@
 
 ## 対象コマンド
 
-実装言語はRust、Cargo packageは `nagoya-kotsu-cli`、バイナリ名は `nkotsu` とする。v0.2.0は `status`、`bus stop`、`bus timetable`、`bus live`、`subway timetable`、`subway next`、`route`、`fare`、`pass`、`delay-cert` を対象とする。
+実装言語はRust、Cargo packageは `nagoya-kotsu-cli`、バイナリ名は `nkotsu` とする。v0.3.0は `status`、`bus stop`、`bus timetable`、`bus live`、`subway timetable`、`subway next`、`route`、`fare`、`pass`、`delay-cert`、`search`、`subway station`、`coordinates`、`nearby` を対象とする。
 
 v0.1.0の既存コマンド・JSON構造・終了コードは維持する。追加機能の仕様は [普通運賃](cli/fare.md)、[定期券料金](cli/pass.md)、[延着証明書](cli/delay-cert.md) に記録している。
 
@@ -22,7 +22,7 @@ v0.1.0の既存コマンド・JSON構造・終了コードは維持する。追�
 
 `--help` と `--version` は失敗ではなく、`--json` 指定時も従来の表示を維持する。
 
-`Failure` に機械判定用の `code` を追加する。対応は以下とし、既存の終了コード0〜6は変更しない。全体失敗時も部分失敗時も同じ分類を使う。全体失敗の `scope` は `command` とし、部分失敗の既存の `scope` は維持する。
+`Failure` に機械判定用の `code` を追加する。対応は以下とし、既存の終了コード0〜6は変更しない。全体失敗時も部分失敗時も同じ分類を使う。通常の全体失敗の `scope` は `command` とし、地点解決では対象引数（`route.from/to/via`、`fare.from/to`、`pass.from/to`）を示す。地点名の曖昧性には名前・完全修飾名・種別の `candidates` 配列を追加し、部分失敗の既存の `scope` は維持する。
 
 | エラー種別 | code | 終了コード |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ v0.1.0の既存コマンド・JSON構造・終了コードは維持する。追�
 
 ## 内蔵ドキュメント
 
-`docs list` と `docs show <name>` を追加し、`bus`、`subway`、`route`、`fare`、`pass`、`delay-cert`、`output`、`troubleshooting` の8文書をバイナリへ埋め込む。インストール後はCLI単体で参照できる。開発Agent向けの `AGENTS.md` と `docs/agents/` の役割は変更しない。
+`docs list` と `docs show <name>` を追加し、`bus`、`subway`、`route`、`fare`、`pass`、`delay-cert`、`places`、`output`、`troubleshooting` の9文書をバイナリへ埋め込む。インストール後はCLI単体で参照できる。開発Agent向けの `AGENTS.md` と `docs/agents/` の役割は変更しない。
 
 通常の `docs list` は名前と概要、`docs show` はMarkdown本文をstdoutへ出力する。`--json` は既存Envelopeを使い、`list` の `data` は名前・概要の一覧、`show` の `data` は名前・概要・Markdown本文とする。API本文を取得しないため、`docs --raw` は `invalid_arguments`、終了コード2で拒否する。
 
@@ -60,7 +60,7 @@ Clapの自動生成helpを基本とし、`about`、`long_about`、`after_help` �
 
 トップレベルと `route` の代表例で `藤が丘` から `名古屋` を検索する場合は、`--subway` を付ける。例をそのまま実行しても交通施設の曖昧性で失敗しないよう、[ADR-0003](adr/0003-reject-ambiguous-endpoint-names.md) に揃える。`--bus` だけなら市バスのみ、`--subway` だけなら地下鉄のみ、無指定または両方指定なら両方を対象にすること、交通手段指定が地点候補と乗車区間の両方へ適用されることも短く説明する。
 
-Helpの追加によって引数解析・名前解決・検索条件の既存の挙動は変更しない。
+地点入力は [地点の利用仕様](cli/places.md) に従い、関連コマンドで完全修飾名を共通入力とする。完全修飾名は正規化後の完全一致だけで解決し、対象種別との矛盾は引数エラーとする。駅記号入力は追加しない。旧コマンド名・オプション名・JSON項目名と既定半径の移行方法も同文書に記載する。
 
 ## バス接近情報
 

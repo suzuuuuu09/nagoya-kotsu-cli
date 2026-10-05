@@ -2,7 +2,7 @@ use crate::{
     api::{self, id, null_default, text},
     cli::PlaceType,
     client::{ApiClient, Policy},
-    error::Error,
+    error::{Error, PlaceCandidate},
     model::{PlaceLocation, SearchPlace},
 };
 use serde::Deserialize;
@@ -97,6 +97,68 @@ pub fn checked_input(input: &str, kind: Option<PlaceType>) -> Result<String, Err
     Ok(input)
 }
 
+pub fn choose<T>(
+    input: &str,
+    kind: PlaceType,
+    values: &[T],
+    name: impl Fn(&T) -> String,
+) -> Result<usize, Error> {
+    resolve(input, Some(kind), values, name, |_| kind)
+}
+
+pub fn resolve<T>(
+    input: &str,
+    kind: Option<PlaceType>,
+    values: &[T],
+    name: impl Fn(&T) -> String,
+    get_kind: impl Fn(&T) -> PlaceType,
+) -> Result<usize, Error> {
+    let input = checked_input(input, kind)?;
+    let (base, suffix) = split_name(&input);
+    let kind = kind.or(suffix);
+    let names: Vec<_> = values.iter().map(&name).collect();
+    let matches = |exact: bool| {
+        values
+            .iter()
+            .enumerate()
+            .filter(|(i, value)| {
+                kind.is_none_or(|k| k == get_kind(value))
+                    && if suffix.is_some() {
+                        api::normalize(&qualified_name(&names[*i], get_kind(value))) == input
+                    } else if exact {
+                        api::normalize(&names[*i]) == base
+                    } else {
+                        api::normalize(&names[*i]).contains(base)
+                    }
+            })
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>()
+    };
+    let mut indices = matches(true);
+    if indices.is_empty() && suffix.is_none() {
+        indices = matches(false);
+    }
+    match indices.as_slice() {
+        [i] => Ok(*i),
+        [] => Err(Error::PlaceNotFound { name: input, kind }),
+        _ => {
+            let mut candidates: Vec<_> = indices
+                .into_iter()
+                .map(|i| PlaceCandidate {
+                    qualified_name: qualified_name(&names[i], get_kind(&values[i])),
+                    name: names[i].clone(),
+                    kind: get_kind(&values[i]).as_str().into(),
+                })
+                .collect();
+            candidates.sort_by(|a, b| a.qualified_name.cmp(&b.qualified_name));
+            Err(Error::PlaceAmbiguous {
+                name: input,
+                candidates,
+            })
+        }
+    }
+}
+
 pub struct Entry {
     pub name: String,
     pub kind: PlaceType,
@@ -123,9 +185,19 @@ impl Entry {
         });
     }
     pub fn location(&self) -> Result<PlaceLocation, Error> {
-        let (latitude, longitude) = self
-            .coordinate()?
-            .ok_or_else(|| Error::InvalidResponse("施設の座標がありません".into()))?;
+        let (latitude, longitude) = match self.coordinate() {
+            Ok(Some(coords)) => coords,
+            coords => {
+                return Err(Error::CoordinatesUnavailable {
+                    name: self.qualified_name.clone(),
+                    kind: self.kind,
+                    reason: match coords {
+                        Ok(None) => "座標が欠落しています".into(),
+                        _ => "座標が不正または矛盾しています".into(),
+                    },
+                });
+            }
+        };
         Ok(PlaceLocation {
             name: self.name.clone(),
             qualified_name: self.qualified_name.clone(),
@@ -145,50 +217,8 @@ pub struct Index {
 }
 impl Index {
     pub fn resolve(&self, input: &str, kind: Option<PlaceType>) -> Result<&Entry, Error> {
-        let (name, suffix) = split_name(input);
-        let name = api::normalize(name);
-        let kind = kind.or(suffix);
-        let candidates: Vec<_> = self
-            .entries
-            .iter()
-            .filter(|entry| kind.is_none_or(|kind| kind == entry.kind))
-            .collect();
-        let i = api::choose(&name, &candidates, |entry| entry.name.clone()).map_err(|error| {
-            let names = match &error {
-                Error::Ambiguous { .. } => {
-                    let exact = candidates.iter().any(|e| api::normalize(&e.name) == name);
-                    candidates
-                        .iter()
-                        .filter(|e| {
-                            if exact {
-                                api::normalize(&e.name) == name
-                            } else {
-                                api::normalize(&e.name).contains(&name)
-                            }
-                        })
-                        .map(|e| e.qualified_name.clone())
-                        .collect::<Vec<_>>()
-                }
-                _ => candidates
-                    .iter()
-                    .take(12)
-                    .map(|e| e.qualified_name.clone())
-                    .collect(),
-            }
-            .join("、");
-            match error {
-                Error::Ambiguous { .. } => Error::Ambiguous {
-                    name: input.into(),
-                    candidates: names,
-                },
-                Error::NotFound { .. } => Error::NotFound {
-                    name: input.into(),
-                    candidates: names,
-                },
-                error => error,
-            }
-        })?;
-        Ok(candidates[i])
+        let i = resolve(input, kind, &self.entries, |e| e.name.clone(), |e| e.kind)?;
+        Ok(&self.entries[i])
     }
 }
 
@@ -369,7 +399,12 @@ pub async fn suggest(
         ));
         for (value, separator, target, field) in [
             (s.station_num.as_deref(), '|', &mut candidate.codes, "codes"),
-            (s.line_name.as_deref(), ',', &mut candidate.lines, "lines"),
+            (
+                s.line_name.as_deref(),
+                ',',
+                &mut candidate.lines,
+                "reported_lines",
+            ),
         ] {
             if field == "codes" && kind == PlaceType::Bus {
                 continue;
@@ -425,7 +460,7 @@ pub async fn suggest(
             qualified_name: candidate.entry.qualified_name,
             kind: kind.as_str().into(),
             codes: candidate.codes.into_iter().collect(),
-            lines: candidate.lines.into_iter().collect(),
+            reported_lines: candidate.lines.into_iter().collect(),
             latitude: coords.map(|c| c.0),
             longitude: coords.map(|c| c.1),
         });

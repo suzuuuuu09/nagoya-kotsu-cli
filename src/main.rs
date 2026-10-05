@@ -82,6 +82,15 @@ async fn main() -> std::process::ExitCode {
                 }
             }
             failure(&e, cli.json, cli.verbose);
+            let args: Vec<String> = args
+                .iter()
+                .skip(1)
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            let recovery = output::recovery(&e, &args);
+            if !recovery.is_empty() {
+                eprint!("{recovery}");
+            }
             std::process::ExitCode::from(e.exit_code())
         }
     }
@@ -127,11 +136,11 @@ fn display(
     } else if cli.json {
         serde_json::to_string_pretty(result)
     } else {
-        Ok(output::human(
-            result,
-            matches!(&cli.command, cli::Command::Route(r) if r.details),
-            cli.quiet,
-        ))
+        let args: Vec<String> = std::env::args_os()
+            .skip(1)
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        Ok(output::human(result, cli, &args))
     };
     match serialized {
         Ok(text) => {

@@ -14,8 +14,14 @@ struct Price {
 }
 
 pub async fn run(client: &ApiClient, options: &Fare) -> Result<ResultData, Error> {
-    let data =
-        teiki::get_routes(client, &options.from, &options.to, options.route.as_deref()).await?;
+    let data = teiki::get_routes(
+        client,
+        &options.from,
+        &options.to,
+        options.route.as_deref(),
+        "fare",
+    )
+    .await?;
     let mut result = ResultData::new(Data::Empty);
     let mut routes = Vec::new();
     for (name, body) in data.routes {

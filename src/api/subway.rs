@@ -17,13 +17,16 @@ struct Station {
     codes: Vec<String>,
 }
 pub async fn station(client: &ApiClient, input: &str) -> Result<Place, Error> {
+    let input = super::place::checked_input(input, Some(crate::cli::PlaceType::Subway))?;
     let names: Vec<Station> = client
         .json(
             client.site("/station_data/station_subway_infos/station_master.json"),
             Policy::Master,
         )
         .await?;
-    let i = choose(input, &names, |s| s.name.clone())?;
+    let i = super::place::choose(&input, crate::cli::PlaceType::Subway, &names, |s| {
+        s.name.clone()
+    })?;
     let s = &names[i];
     Ok(Place {
         name: s.name.clone(),

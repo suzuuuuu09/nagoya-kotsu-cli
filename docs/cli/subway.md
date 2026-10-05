@@ -1,13 +1,18 @@
 # 地下鉄
 
-`nkotsu subway` は、地下鉄の時刻表と、時刻表から算出した次に発車する予定列車を表示します。予定列車は発車予定に基づく案内であり、実際の列車位置や運行実績を示すものではありません。
+`nkotsu subway` は、地下鉄駅の基本情報・時刻表と、時刻表から算出した次に発車する予定列車を表示します。予定列車は発車予定に基づく案内であり、実際の列車位置や運行実績を示すものではありません。
 
 ```sh
+nkotsu subway station '藤が丘(名古屋市地下鉄)'
 nkotsu subway timetable 藤が丘 --line 東山線
 nkotsu subway timetable 藤が丘 --after 14:00 --limit 10
 nkotsu subway next 藤が丘 --limit 3
 nkotsu subway next 栄 --line 東山線 --direction 藤が丘方面 --json
 ```
+
+`station` は名前・駅記号・代表座標、`timetable` は予定時刻表、`next` は次の予定列車を表示します。駅情報の座標が取得できない場合は、基本情報を保持して不完全さを示します。詳細は `nkotsu docs show places` を参照してください。
+
+地点入力には駅名か検索結果の `qualified_name` を使います。完全修飾名は正規化後の完全一致だけで解決し、市バスの完全修飾名は引数エラーです。駅記号は表示用で、地点指定には使えません。
 
 ## 路線・方面と表示件数
 

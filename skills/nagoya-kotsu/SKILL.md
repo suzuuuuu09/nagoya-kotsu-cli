@@ -28,8 +28,8 @@ description: nkotsu CLIで名古屋市交通局の市バス・地下鉄の運行
 | 定期券料金 | `nkotsu pass <FROM> <TO>` | `nkotsu docs show pass` |
 | 延着証明書 | `nkotsu delay-cert` | `nkotsu docs show delay-cert` |
 | 地点を探す | `nkotsu search <QUERY>` | `nkotsu docs show places` |
-| 地下鉄駅の基本情報 | `nkotsu station <STATION>` | `nkotsu docs show places` |
-| 駅・バス停の座標 | `nkotsu location <PLACE>` | `nkotsu docs show places` |
+| 地下鉄駅の基本情報 | `nkotsu subway station <STATION>` | `nkotsu docs show places` |
+| 駅・バス停の座標 | `nkotsu coordinates <PLACE>` | `nkotsu docs show places` |
 | 周辺の交通施設 | `nkotsu nearby <PLACE>` | `nkotsu docs show places` |
 
 該当する文書とサブコマンドの `--help` を読み、必要なオプションを選ぶ。出力の読み方は `nkotsu docs show output`、失敗への対処は `nkotsu docs show troubleshooting` を参照する。
@@ -40,9 +40,13 @@ description: nkotsu CLIで名古屋市交通局の市バス・地下鉄の運行
 
 地点名に複数候補がある場合は、指定済みの交通手段や場所で候補を絞る。条件から決められなければ、返された候補を示して利用者に選んでもらう。同名の駅とバス停を勝手に選ばない。経路検索は `--bus` または `--subway` で絞り込める。両方指定すると両方が対象になる。
 
-曖昧な地点は `nkotsu search 藤が丘 --json` で候補を探す。選んだ `qualified_name`（例: `藤が丘(名古屋市地下鉄)`）を `route`・`station`・`location`・`nearby` へ渡す。既存の `bus`・`subway`・`fare`・`pass` には `name` を渡す。内部IDを受け渡しに使わない。`search` の路線情報は所属路線を網羅せず、のりばは `bus stop` や時刻表で確認する。
+地点名が曖昧なら `errors[].candidates` の候補を示し、利用者に選んでもらう。経路・料金検索では `scope` の `from/to/via` で修正する引数を確認する。候補が不明な場合は `nkotsu search 藤が丘 --json` で探す。選んだ `qualified_name` を経路・駅情報・停留所情報・時刻表・料金・座標・周辺検索の地点引数へそのまま渡し、種別は対象コマンドに合わせる。完全修飾名は正規化後の完全一致だけで解決する。完全修飾名でも区別できない候補はデータ修正が必要で、内部IDを受け渡しに使わない。未発見時の検索案内は候補の存在を保証しない。
 
-`nearby` の距離は概算直線距離として伝え、徒歩距離・徒歩時間に置き換えない。基準地点の種別は `--origin-type`、結果の種別は `--type` で指定する。`location` と `nearby` は利用者や端末の現在位置を取得しない。
+`search` の `reported_lines` は取得できた参考路線・系統だけで、所属路線を網羅しない。`retrieved_count` は今回取得できた有効候補の件数制限前の数。駅記号は表示用で、地点入力には施設名・完全修飾名を使う。のりばは `bus stop` や時刻表で確認する。
+
+`nearby` は基準施設から既定1,000mの範囲を検索する。基準種別は `--origin-type`、結果種別は `--result-type`、無制限は `--no-radius` を指定する。`matched_count` は条件内の取得済み候補数で、部分結果では取得できた範囲だけを示す。距離は施設の代表点間の概算直線距離として伝え、入口・のりば間の距離や徒歩距離・徒歩時間へ置き換えない。0mでも同一施設・直接乗換可能と推定しない。`coordinates` と `nearby` は現在位置を取得しない。
+
+完全修飾名は経路の端点を指定し、経路全体の交通手段は `--bus` / `--subway` で指定する。地下鉄だけを求められたら地下鉄の完全修飾名に加えて `--subway` を使う。
 
 日時は日本時間で扱う。経路検索の `--at HH:MM` は今日の日付になり、過去の時刻でも翌日には繰り越さない。別の日を調べるときは `YYYY-MM-DDTHH:MM` を使う。出発時刻と到着期限を区別し、到着期限なら `--arrive` を指定する。
 
@@ -75,8 +79,8 @@ description: nkotsu CLIで名古屋市交通局の市バス・地下鉄の運行
 
 ```sh
 nkotsu search 藤が丘 --json
-nkotsu location '藤が丘(名古屋市地下鉄)' --json
-nkotsu nearby '藤が丘(名古屋市地下鉄)' --type bus --json
+nkotsu coordinates '藤が丘(名古屋市地下鉄)' --json
+nkotsu nearby '藤が丘(名古屋市地下鉄)' --result-type bus --json
 nkotsu status --line 東山線 --json
 nkotsu bus stop 上社 --json
 nkotsu bus live 上社 --route 上社12 --json

@@ -19,7 +19,7 @@ nkotsu docs show route --json
 
 独立した取得の一部が失敗した場合は、取得できたデータを保持し、`complete: false` と失敗情報を返します。コマンド全体が失敗した場合は `data: null` とし、引数解析の失敗も同じ形式で返します。どちらの失敗も終了コードは非0です。
 
-各失敗情報には `scope`、`code`、`exit_code`、`message` が含まれます。通常の全体失敗の `scope` は `command` です。`search` の両種別がともに失敗した場合は、`data: null` と各取得範囲の `search.bus`・`search.subway` を返します。エラー種別を機械的に判定する場合は、メッセージの文字列ではなく `code` を使ってください。詳細な診断情報はJSONに含めず、stderrへ出します。
+各失敗情報には `scope`、`code`、`exit_code`、`message` が含まれます。通常の全体失敗の `scope` は `command` です。経路・料金検索の地点解決エラーでは `route.from/to/via`、`fare.from/to`、`pass.from/to` で対象引数を示します。地点名の曖昧性に限り、`candidates` 配列に `name`、`qualified_name`、`type` を返します。券種・路線などの候補はこの施設モデルへ変換しません。`search` の両種別がともに失敗した場合は、`data: null` と各取得範囲の `search.bus`・`search.subway` を返します。エラー種別を機械的に判定する場合は、メッセージの文字列ではなく `code` を使ってください。詳細な診断情報はJSONに含めず、stderrへ出します。
 
 ## エラー種別と終了コード
 
@@ -35,6 +35,8 @@ nkotsu docs show route --json
 | 6 | API内部エラー | `upstream_error` |
 
 部分失敗で複数のエラーがある場合は、それぞれの終了コードのうち数値が最大のものを返します。
+
+地点系コマンドのHumanの部分結果は冒頭に「部分結果」、不足・不正な範囲、終了コードを表示します。`--quiet` でもこの表示を残し、詳細はstderrへ出します。地点検索の不完全な0件は、完全な該当なしと区別して表示します。
 
 ## 生レスポンスと内蔵ドキュメント
 

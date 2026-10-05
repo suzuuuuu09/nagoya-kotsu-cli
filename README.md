@@ -165,37 +165,37 @@ nkotsu delay-cert --date 2026-09-08 --limit 5 --json
 
 ### 駅・バス停検索: `search`
 
-市バス停と地下鉄駅を横断検索します。`--type` で種別、`--limit` で件数を指定できます。候補は自動選択せず、返された `qualified_name` で同名施設を区別します。
+市バス停と地下鉄駅を横断検索します。`--type` で種別、`--limit` で件数を指定できます。候補は自動選択せず、返された `qualified_name` で同名施設を区別します。選んだ完全修飾名は、経路・時刻表・停留所情報・駅情報・料金・座標・周辺検索の地点引数へそのまま渡せます。取得済み候補数は `retrieved_count`、参考路線・系統は `reported_lines` で返し、所属路線の網羅性は保証しません。
 
 ```sh
 nkotsu search 藤が丘
 nkotsu search 藤が丘 --type subway --limit 5 --json
 ```
 
-### 地下鉄駅情報: `station`
+### 地下鉄駅情報: `subway station`
 
 地下鉄駅の名前・駅記号・代表座標を表示します。座標が取得できない場合も、正常な駅情報を保持します。
 
 ```sh
-nkotsu station 藤が丘
-nkotsu station 名古屋 --json
+nkotsu subway station 藤が丘
+nkotsu subway station 名古屋 --json
 ```
 
-### 座標: `location`
+### 座標: `coordinates`
 
 交通施設の代表座標を取得します。利用者や端末の現在位置は取得しません。同名施設は完全修飾名か `--type` で指定します。
 
 ```sh
-nkotsu location '藤が丘(名古屋市地下鉄)'
-nkotsu location 上社 --type bus --json
+nkotsu coordinates '藤が丘(名古屋市地下鉄)'
+nkotsu coordinates 上社 --type bus --json
 ```
 
 ### 周辺検索: `nearby`
 
-指定施設から近い駅・バス停を検索します。`--origin-type` は基準地点、`--type` は結果の種別を指定します。距離は概算直線距離であり、徒歩距離・徒歩時間ではありません。
+指定施設を基準に、既定半径1,000mで近い駅・バス停を検索します。`--radius` で半径を変え、無制限なら `--no-radius` を指定します。`--origin-type` は基準施設、`--result-type` は探す施設の種別を指定します。距離は施設の代表点間の概算直線距離であり、入口・のりば間の距離や徒歩距離・徒歩時間ではありません。件数制限前の候補数は `matched_count` で確認できます。
 
 ```sh
-nkotsu nearby 藤が丘 --origin-type subway --type bus
+nkotsu nearby 藤が丘 --origin-type subway --result-type bus
 nkotsu nearby 栄 --origin-type subway --radius 500 --limit 5 --json
 ```
 
@@ -203,9 +203,19 @@ nkotsu nearby 栄 --origin-type subway --radius 500 --limit 5 --json
 
 ### 名前の検索と候補の選択
 
-名前はNFKC正規化し、完全一致する候補を優先して検索します。完全一致する候補がなければ部分一致で検索し、候補が複数あれば候補を表示して終了します。
+通常名は前後空白除去・NFKC正規化し、完全一致する候補を優先して検索します。完全一致する候補がなければ部分一致で検索し、候補が複数あれば候補を表示して終了します。
+
+完全修飾名は正規化後の完全一致だけで解決します。駅記号は表示用であり、地点指定には施設名か完全修飾名を使ってください。入力例の引用符はbash・zsh向けです。
 
 経路検索では、`--bus` だけなら市バスのみ、`--subway` だけなら地下鉄のみを対象にします。両方を指定した場合と、どちらも指定しない場合は、市バスと地下鉄の両方を対象にします。同名の交通施設を区別するには、交通手段を指定するか、`藤が丘(名古屋市地下鉄)` のような具体的な候補名を使ってください。
+
+旧 `location`・トップレベル `station`・`nearby --type` は廃止し、互換エイリアスはありません。JSON項目名と既定半径も含む変更一覧は [地点の内蔵ドキュメント](docs/cli/places.md#初期v030設計実装からの変更) を参照してください。
+
+完全修飾名は交通施設を指定し、経路全体の交通手段を制限しません。地下鉄だけの経路には `--subway` を指定します。
+
+```sh
+nkotsu route '藤が丘(名古屋市地下鉄)' '名古屋(名古屋市地下鉄)' --subway
+```
 
 ## ヘルプと内蔵ドキュメント
 
@@ -263,7 +273,7 @@ CLIを利用するエージェント向けに、[nagoya-kotsu skill](skills/nago
 {"schema_version":1,"complete":true,"data":{},"errors":[]}
 ```
 
-独立した取得の一部が失敗した場合は、取得できたデータを保持し、`complete: false` と `errors` を返します。引数解析を含むコマンド全体の失敗もJSONで返し、その場合は `data: null` とします。どちらの失敗も終了コードは非0で、stdoutに人間向けエラーを混在させません。
+独立した取得の一部が失敗した場合は、取得できたデータを保持し、`complete: false` と `errors` を返します。引数解析を含むコマンド全体の失敗もJSONで返し、その場合は `data: null` とします。どちらの失敗も終了コードは非0で、JSONのstdoutに人間向けエラーを混在させません。地点系コマンドのHumanでは部分結果の冒頭に不完全さと不足範囲を示し、`--quiet` でも表示します。
 
 各エラーには `scope`、`code`、`exit_code`、`message` が含まれます。機械的に種別を判定する場合は、メッセージの文字列ではなく `code` を使ってください。終了コード0は成功を示し、有効な条件で結果が0件の場合も含みます。非0の終了コードとエラー種別の対応は次のとおりです。
 

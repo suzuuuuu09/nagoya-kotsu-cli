@@ -1,20 +1,20 @@
 use crate::{
     api::{self, place},
-    cli::{Location, Nearby, PlaceType, Search},
+    cli::{Coordinates, Nearby, PlaceType, Search},
     client::ApiClient,
     error::Error,
     model::{Data, NearbyPlace, NearbyResult, ResultData, SearchResult, StationInfo},
 };
 
-pub async fn location(client: &ApiClient, options: &Location) -> Result<ResultData, Error> {
+pub async fn coordinates(client: &ApiClient, options: &Coordinates) -> Result<ResultData, Error> {
     let input = place::checked_input(&options.place, options.kind)?;
     let index = place::place_index(client).await?;
     let entry = index.resolve(&input, options.kind)?;
-    let mut result = ResultData::new(Data::Location(entry.location()?));
+    let mut result = ResultData::new(Data::Coordinates(entry.location()?));
     let selected_name = api::normalize(&entry.name);
     for (name, error) in index.errors {
         if name.is_some_and(|name| name == selected_name) {
-            result.fail("location.coordinates", error);
+            result.fail("coordinates.coordinates", error);
         }
     }
     Ok(result)
@@ -36,7 +36,7 @@ pub async fn nearby(client: &ApiClient, options: &Nearby) -> Result<ResultData, 
             Ok(location) => {
                 let distance = place::distance_m(&origin, &location);
                 if options
-                    .radius
+                    .effective_radius()
                     .is_none_or(|radius| distance <= radius as f64)
                 {
                     places.push(NearbyPlace {
@@ -56,8 +56,13 @@ pub async fn nearby(client: &ApiClient, options: &Nearby) -> Result<ResultData, 
             .cmp(&b.distance_m)
             .then_with(|| a.location.qualified_name.cmp(&b.location.qualified_name))
     });
+    let matched_count = places.len();
     places.truncate(options.limit as usize);
-    result.data = Data::Nearby(NearbyResult { origin, places });
+    result.data = Data::Nearby(NearbyResult {
+        origin,
+        matched_count,
+        places,
+    });
     Ok(result)
 }
 
@@ -100,11 +105,11 @@ pub async fn search(client: &ApiClient, options: &Search) -> Result<ResultData, 
                     &b.qualified_name,
                 ))
         });
-        let total = places.len();
+        let retrieved_count = places.len();
         places.truncate(options.limit as usize);
         result.data = Data::Search(SearchResult {
             query,
-            total,
+            retrieved_count,
             results: places,
         });
     }
@@ -113,9 +118,9 @@ pub async fn search(client: &ApiClient, options: &Search) -> Result<ResultData, 
 
 pub async fn station(client: &ApiClient, input: &str) -> Result<ResultData, Error> {
     let input = place::checked_input(input, Some(PlaceType::Subway))?;
-    let (name, _) = place::split_name(&input);
     let stations = place::stations(client).await?;
-    let station = &stations[api::choose(name, &stations, |s| s.name.clone())?];
+    let station =
+        &stations[place::choose(&input, PlaceType::Subway, &stations, |s| s.name.clone())?];
     let mut result = ResultData::new(Data::Empty);
     let coords = match place::coordinates(client)
         .await

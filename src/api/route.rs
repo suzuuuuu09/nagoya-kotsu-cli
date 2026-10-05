@@ -1,5 +1,5 @@
 use crate::{
-    api::{choose, id, text},
+    api::{id, text},
     client::{ApiClient, Format, Policy},
     error::Error,
     model::{Place, Route, Segment},
@@ -24,11 +24,17 @@ pub async fn resolve(
     bus: bool,
     subway: bool,
 ) -> Result<Place, Error> {
-    let key = super::normalize(input);
-    let base_name = key
-        .strip_suffix("(名古屋市地下鉄)")
-        .or_else(|| key.strip_suffix("(名古屋市バス)"))
-        .unwrap_or(&key);
+    let kind = if bus != subway {
+        Some(if bus {
+            crate::cli::PlaceType::Bus
+        } else {
+            crate::cli::PlaceType::Subway
+        })
+    } else {
+        None
+    };
+    let key = super::place::checked_input(input, kind)?;
+    let (base_name, _) = super::place::split_name(&key);
     let mut url = reqwest::Url::parse(&client.map("/optimizeapi/api/Suggest/StationInfos/json"))
         .map_err(|e| Error::Arguments(e.to_string()))?;
     url.query_pairs_mut()
@@ -77,21 +83,20 @@ pub async fn resolve(
             codes: Vec::new(),
         });
     }
-    let exact: Vec<_> = places
-        .iter()
-        .filter(|p| super::normalize(&p.name) == key || super::normalize(&p.search_name) == key)
-        .cloned()
-        .collect();
-    let candidates = if exact.is_empty() { places } else { exact };
-    let index = if candidates.len() == 1
-        && (super::normalize(&candidates[0].name) == key
-            || super::normalize(&candidates[0].search_name) == key)
-    {
-        0
-    } else {
-        choose(&key, &candidates, |p| p.search_name.clone())?
-    };
-    Ok(candidates[index].clone())
+    let index = super::place::resolve(
+        &key,
+        kind,
+        &places,
+        |p| p.name.clone(),
+        |p| {
+            if p.kind == "bus" {
+                crate::cli::PlaceType::Bus
+            } else {
+                crate::cli::PlaceType::Subway
+            }
+        },
+    )?;
+    Ok(places[index].clone())
 }
 
 pub async fn search(

@@ -55,11 +55,19 @@ pub async fn get_routes(
     from: &str,
     to: &str,
     route: Option<&str>,
+    scope: &str,
 ) -> Result<Routes, Error> {
+    let kind = crate::cli::PlaceType::Subway;
+    let from = super::place::checked_input(from, Some(kind))
+        .map_err(|e| e.scoped(format!("{scope}.from")))?;
+    let to =
+        super::place::checked_input(to, Some(kind)).map_err(|e| e.scoped(format!("{scope}.to")))?;
     let stations: BTreeMap<String, String> = master(client, "station.json").await?;
     let stations: Vec<_> = stations.into_iter().collect();
-    let from = &stations[choose(from, &stations, |s| s.1.clone())?];
-    let to = &stations[choose(to, &stations, |s| s.1.clone())?];
+    let from = &stations[super::place::choose(&from, kind, &stations, |s| s.1.clone())
+        .map_err(|e| e.scoped(format!("{scope}.from")))?];
+    let to = &stations[super::place::choose(&to, kind, &stations, |s| s.1.clone())
+        .map_err(|e| e.scoped(format!("{scope}.to")))?];
     checked_id(&to.0)?;
     let ends: BTreeMap<String, Identifier> =
         master(client, &format!("ends/{}.json", checked_id(&from.0)?)).await?;

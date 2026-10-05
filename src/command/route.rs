@@ -30,13 +30,40 @@ pub async fn run(client: &ApiClient, options: &Route) -> Result<ResultData, Erro
     } else {
         (now.date_naive(), now.hour(), now.minute())
     };
+    let kind = if options.bus != options.subway {
+        Some(if options.bus {
+            crate::cli::PlaceType::Bus
+        } else {
+            crate::cli::PlaceType::Subway
+        })
+    } else {
+        None
+    };
+    for (scope, input) in [
+        ("route.from", Some(&options.from)),
+        ("route.to", Some(&options.to)),
+        ("route.via", options.via.as_ref()),
+    ] {
+        if let Some(input) = input {
+            api::place::checked_input(input, kind).map_err(|e| e.scoped(scope))?;
+        }
+    }
     let (from, to) = tokio::try_join!(
-        api::route::resolve(client, &options.from, options.bus, options.subway),
-        api::route::resolve(client, &options.to, options.bus, options.subway)
+        async {
+            api::route::resolve(client, &options.from, options.bus, options.subway)
+                .await
+                .map_err(|e| e.scoped("route.from"))
+        },
+        async {
+            api::route::resolve(client, &options.to, options.bus, options.subway)
+                .await
+                .map_err(|e| e.scoped("route.to"))
+        }
     )?;
     let via = if let Some(via) = &options.via {
         api::route::resolve(client, via, options.bus, options.subway)
-            .await?
+            .await
+            .map_err(|e| e.scoped("route.via"))?
             .search_name
     } else {
         String::new()

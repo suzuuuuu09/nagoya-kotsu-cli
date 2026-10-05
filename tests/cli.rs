@@ -14,10 +14,558 @@ fn place_response(request: &str) -> Response {
     })
 }
 
+#[cfg(unix)]
+#[test]
+fn retry_moves_option_like_endpoints_after_an_existing_separator() {
+    let server = Server::new(|request| {
+        if request.contains("StationInfos") {
+            Response::json(
+                r#"[{"station_cd":"1","station_div":"2","station_name":"-駅","latitude":35,"longitude":137},{"station_cd":"2","station_div":"2","station_name":"到着駅","latitude":35,"longitude":137}]"#,
+            )
+        } else if request.contains("SETTING") {
+            Response {
+                status: 200,
+                mime: "text/javascript",
+                headers: String::new(),
+                body: r#"var s={guid:"public",apipath:"/NagoyaRoute/PRD/"};"#.into(),
+            }
+        } else {
+            Response {
+                status: 200,
+                mime: "text/xml",
+                headers: String::new(),
+                body: "<NorikaeData><Nstatus><Status>true</Status></Nstatus></NorikaeData>".into(),
+            }
+        }
+    });
+    let out = server.run(&[
+        "route",
+        "駅",
+        "--no-cache",
+        "--at",
+        "09:00",
+        "--",
+        "到着駅(名古屋市地下鉄)",
+    ]);
+    assert_eq!(out.status.code(), Some(3));
+    let text = String::from_utf8_lossy(&out.stderr);
+    let retry = text
+        .lines()
+        .find_map(|line| line.strip_prefix("  nkotsu "))
+        .unwrap();
+    assert!(retry.contains("--at 09:00"));
+    let command = format!("{} {}", env!("CARGO_BIN_EXE_nkotsu"), retry);
+    let out = Command::new("sh")
+        .args(["-c", &command])
+        .env("NKOTSU_BASE_URL", &server.url)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{retry}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn recovery_commands_quote_names_and_handle_option_like_place_names() {
+    let server = Server::new(|request| {
+        Response::json(if request.contains("StationInfos") {
+            "[]"
+        } else if request.contains("station_name") {
+            "{}"
+        } else if request.contains("station_master") {
+            r#"[{"name":"-駅"},{"name":"A'駅"}]"#
+        } else {
+            r#"[{"name":"-駅(名古屋市地下鉄)","lat":35,"lng":137},{"name":"A'駅(名古屋市地下鉄)","lat":35,"lng":137}]"#
+        })
+    });
+    let out = server.run(&["coordinates", "駅", "--type=subway", "--no-cache"]);
+    let text = String::from_utf8_lossy(&out.stderr);
+    let retries: Vec<_> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("  nkotsu "))
+        .collect();
+    assert_eq!(retries.len(), 2, "{text}");
+    for retry in retries {
+        let command = format!("{} {}", env!("CARGO_BIN_EXE_nkotsu"), retry);
+        let out = Command::new("sh")
+            .args(["-c", &command])
+            .env("NKOTSU_BASE_URL", &server.url)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{retry}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let out = server.run(&["coordinates", "--no-cache", "--", "-未発見(名古屋市地下鉄)"]);
+    let text = String::from_utf8_lossy(&out.stderr);
+    let retry = text
+        .lines()
+        .find_map(|line| line.strip_prefix("  nkotsu "))
+        .unwrap();
+    let command = format!("{} --no-cache {}", env!("CARGO_BIN_EXE_nkotsu"), retry);
+    let out = Command::new("sh")
+        .args(["-c", &command])
+        .env("NKOTSU_BASE_URL", &server.url)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{retry}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn route_human_reports_allowed_modes_independently_of_endpoint_type() {
+    let server = Server::new(|request| {
+        if request.contains("StationInfos") {
+            Response::json(
+                r#"[{"station_cd":"1","station_div":"1","station_name":"藤が丘","latitude":35,"longitude":137},{"station_cd":"2","station_div":"2","station_name":"藤が丘","latitude":35,"longitude":137}]"#,
+            )
+        } else if request.contains("SETTING") {
+            Response {
+                status: 200,
+                mime: "text/javascript",
+                headers: String::new(),
+                body: r#"var s={guid:"public",apipath:"/NagoyaRoute/PRD/"};"#.into(),
+            }
+        } else {
+            Response {
+                status: 200,
+                mime: "text/xml",
+                headers: String::new(),
+                body: "<NorikaeData><Nstatus><Status>true</Status></Nstatus></NorikaeData>".into(),
+            }
+        }
+    });
+    for (name, flags, expected) in [
+        ("藤が丘(名古屋市地下鉄)", vec![], "市バス・地下鉄"),
+        ("藤が丘(名古屋市地下鉄)", vec!["--subway"], "地下鉄のみ"),
+        ("藤が丘(名古屋市バス)", vec!["--bus"], "市バスのみ"),
+        (
+            "藤が丘(名古屋市地下鉄)",
+            vec!["--bus", "--subway"],
+            "市バス・地下鉄",
+        ),
+    ] {
+        let mut args = vec!["route", name, name, "--no-cache"];
+        args.extend(flags);
+        let out = server.run(&args);
+        assert!(out.status.success());
+        assert!(
+            String::from_utf8_lossy(&out.stdout)
+                .contains(&format!("検索対象の交通手段: {expected}"))
+        );
+    }
+}
+
+#[test]
+fn search_identifiers_work_unchanged_in_each_related_command() {
+    let server = Server::new(|request| {
+        if request.contains("/teiki/") {
+            teiki_response(request)
+        } else if request.contains("StationInfos") {
+            Response::json(if request.contains("div=1") {
+                r#"[{"station_cd":"1","station_div":"1","station_name":"藤が丘","latitude":35.182355,"longitude":137.021418}]"#
+            } else {
+                r#"[{"station_cd":"2","station_div":"2","station_name":"藤が丘","latitude":35.182355,"longitude":137.021418}]"#
+            })
+        } else if request.contains("bus_service_status") {
+            Response::json(r#"[{"bus_service_active":true}]"#)
+        } else if request.contains("/busstops/") {
+            Response::json(r#"{"POLES":[]}"#)
+        } else if request.contains("/stations/") {
+            Response::json(r#"{"POLES":{}}"#)
+        } else if request.contains("/diagrams/") {
+            Response::json(r#"{"東山線":[{"DIAGRAM":{"平日":{"27":[59]}}}]}"#)
+        } else if request.contains("SETTING.js") {
+            Response {
+                status: 200,
+                mime: "text/javascript",
+                headers: String::new(),
+                body: r#"var s={guid:"public",apipath:"/NagoyaRoute/PRD/"};"#.into(),
+            }
+        } else if request.contains("SearchRouteDiagram") {
+            Response {
+                status: 200,
+                mime: "text/xml",
+                headers: String::new(),
+                body: "<NorikaeData><Nstatus><Status>true</Status></Nstatus></NorikaeData>".into(),
+            }
+        } else {
+            place_response(request)
+        }
+    });
+    let out = server.run(&["search", "藤が丘", "--json", "--no-cache"]);
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let candidates = value["data"]["results"].as_array().unwrap();
+    let subway = candidates.iter().find(|c| c["type"] == "subway").unwrap()["qualified_name"]
+        .as_str()
+        .unwrap();
+    let bus = candidates.iter().find(|c| c["type"] == "bus").unwrap()["qualified_name"]
+        .as_str()
+        .unwrap();
+    for mut args in [
+        vec!["bus", "stop", bus],
+        vec!["bus", "timetable", bus, "--day", "weekday"],
+        vec!["bus", "live", bus],
+        vec!["subway", "station", subway],
+        vec!["subway", "timetable", subway, "--day", "weekday"],
+        vec![
+            "subway", "next", subway, "--day", "weekday", "--at", "00:00", "--limit", "1",
+        ],
+        vec!["fare", subway, "名古屋(名古屋市地下鉄)"],
+        vec!["pass", subway, "名古屋(名古屋市地下鉄)"],
+        vec!["coordinates", subway],
+        vec!["nearby", subway, "--result-type", "bus"],
+        vec!["route", subway, subway, "--subway", "--via", subway],
+    ] {
+        args.extend(["--json", "--no-cache"]);
+        let out = server.run(&args);
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    server.requests.lock().unwrap().clear();
+    for args in [
+        vec!["bus", "stop", subway],
+        vec!["bus", "timetable", subway],
+        vec!["bus", "live", subway],
+        vec!["subway", "station", bus],
+        vec!["subway", "timetable", bus],
+        vec!["subway", "next", bus],
+        vec!["fare", subway, bus],
+        vec!["pass", subway, bus],
+        vec!["route", subway, bus, "--subway"],
+    ] {
+        assert_eq!(server.run(&args).status.code(), Some(2), "{args:?}");
+    }
+    assert!(server.requests.lock().unwrap().is_empty());
+}
+
+#[test]
+fn unavailable_coordinates_and_unusable_candidate_names_explain_the_next_step() {
+    let server = Server::new(|request| {
+        if request.contains("station_master") {
+            Response::json(r#"[{"name":"Ｆ駅"},{"name":"F駅"},{"name":"欠落"},{"name":"不正"}]"#)
+        } else if request.contains("station_name") {
+            Response::json("{}")
+        } else {
+            Response::json(r#"[{"name":"不正(名古屋市地下鉄)","lat":91,"lng":137}]"#)
+        }
+    });
+    let out = server.run(&["coordinates", "F駅(名古屋市地下鉄)", "--no-cache"]);
+    assert_eq!(out.status.code(), Some(3));
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("完全修飾名でも区別できません"), "{text}");
+    assert!(!text.contains("nkotsu coordinates"));
+    for (name, reason) in [("欠落", "欠落"), ("不正", "不正")] {
+        let out = server.run(&["coordinates", name, "--no-cache"]);
+        assert_eq!(out.status.code(), Some(5));
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(text.contains("見つかりました"));
+        assert!(text.contains(reason));
+        assert!(text.contains("nkotsu subway station"));
+        assert!(text.contains("座標の問題は解消しません"));
+    }
+    let out = server.run(&["coordinates", "未知(名古屋市地下鉄)", "--no-cache"]);
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        text.contains("nkotsu search '未知' --type subway"),
+        "{text}"
+    );
+    assert!(!text.contains("Ｆ駅"));
+}
+
+#[test]
+fn empty_nearby_results_offer_only_applicable_retries_and_keep_conditions() {
+    let server = Server::new(|request| {
+        Response::json(if request.contains("station_name") {
+            r#"{"遠いバス":1}"#
+        } else if request.contains("station_master") {
+            r#"[{"id":"1","name":"起点","codes":["H01"]}]"#
+        } else {
+            r#"[{"name":"起点(名古屋市地下鉄)","lat":35,"lng":137},{"name":"遠いバス","lat":35,"lng":137.1}]"#
+        })
+    });
+    let out = server.run(&[
+        "--refresh",
+        "nearby",
+        "起点",
+        "--origin-type",
+        "subway",
+        "--result-type=bus",
+        "--radius=5",
+        "--limit",
+        "2",
+        "--no-cache",
+    ]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("半径: 5m / 探す施設: 市バス / 上限: 2件"),
+        "{text}"
+    );
+    let retries: Vec<_> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("  nkotsu "))
+        .collect();
+    assert_eq!(retries.len(), 2, "{text}");
+    for retry in &retries {
+        assert!(retry.contains("'起点(名古屋市地下鉄)'"));
+        assert!(retry.contains("--refresh"));
+        assert!(retry.contains("--limit 2"));
+    }
+    #[cfg(unix)]
+    {
+        let command = format!("{} {}", env!("CARGO_BIN_EXE_nkotsu"), retries[0]);
+        let retried = Command::new("sh")
+            .args(["-c", &command])
+            .env("NKOTSU_BASE_URL", &server.url)
+            .output()
+            .unwrap();
+        assert!(
+            retried.status.success(),
+            "{}",
+            String::from_utf8_lossy(&retried.stderr)
+        );
+        assert!(String::from_utf8_lossy(&retried.stdout).contains("遠いバス [市バス]"));
+    }
+    let out = server.run(&[
+        "nearby",
+        "遠いバス(名古屋市バス)",
+        "--no-radius",
+        "--result-type",
+        "bus",
+        "--no-cache",
+    ]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!text.contains("距離制限を外して再検索"));
+    assert!(text.contains("結果種別を両方にして再検索"));
+    let server = Server::new(|request| {
+        Response::json(if request.contains("station_name") {
+            "{}"
+        } else if request.contains("station_master") {
+            r#"[{"name":"起点"}]"#
+        } else {
+            r#"[{"name":"起点(名古屋市地下鉄)","lat":35,"lng":137}]"#
+        })
+    });
+    let out = server.run(&["nearby", "起点", "--no-radius", "--no-cache"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(!text.contains("再検索"));
+    assert!(text.contains("取得した対象データの範囲で0件"), "{text}");
+}
+
+#[test]
+fn help_makes_facility_inputs_and_transport_modes_explicit() {
+    for args in [
+        vec!["bus", "stop"],
+        vec!["bus", "timetable"],
+        vec!["bus", "live"],
+        vec!["subway", "station"],
+        vec!["subway", "timetable"],
+        vec!["subway", "next"],
+        vec!["route"],
+        vec!["fare"],
+        vec!["pass"],
+        vec!["coordinates"],
+        vec!["nearby"],
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+            .args(&args)
+            .arg("--help")
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("完全修飾名"), "{args:?}: {text}");
+        assert!(text.contains("駅記号"), "{args:?}: {text}");
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
+        .args(["route", "--help"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("経路全体の交通手段を制限しません"));
+}
+
+#[test]
+fn discovery_output_explains_counts_distances_and_partial_results() {
+    let server = Server::new(|request| {
+        if request.contains("StationInfos") {
+            if request.contains("div=2") {
+                let mut response = Response::json("{}");
+                response.status = 503;
+                response
+            } else {
+                Response::json(
+                    r#"[{"station_cd":"1","station_div":"1","station_name":"藤が丘","line_name":"幹藤丘1","latitude":35,"longitude":137}]"#,
+                )
+            }
+        } else {
+            place_response(request)
+        }
+    });
+    let out = server.run(&["search", "藤が丘", "--quiet", "--no-cache"]);
+    assert_eq!(out.status.code(), Some(4));
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.starts_with("部分結果"), "{text}");
+    for phrase in [
+        "search.subway",
+        "取得できた範囲",
+        "取得済み候補1件・表示1件",
+        "参考路線・系統: 幹藤丘1",
+        "所属路線を網羅しません",
+        "入力用: '藤が丘(名古屋市バス)'",
+    ] {
+        assert!(text.contains(phrase), "{phrase}: {text}");
+    }
+    let out = server.run(&["search", "藤が丘", "--json", "--no-cache"]);
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["data"]["retrieved_count"], 1);
+    assert!(value["data"].get("total").is_none());
+    assert!(value["data"]["results"][0].get("lines").is_none());
+    assert_eq!(
+        value["data"]["results"][0]["reported_lines"],
+        serde_json::json!(["幹藤丘1"])
+    );
+    let out = server.run(&[
+        "nearby",
+        "藤が丘(名古屋市地下鉄)",
+        "--radius",
+        "1500",
+        "--limit",
+        "1",
+        "--no-cache",
+    ]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    for phrase in [
+        "半径: 1500m",
+        "候補2件・表示1件",
+        "代表点間の概算直線距離",
+        "入口・のりば間",
+        "入力用: '藤が丘(名古屋市バス)'",
+        "--limit 2",
+    ] {
+        assert!(text.contains(phrase), "{phrase}: {text}");
+    }
+    let out = server.run(&["nearby", "藤が丘(名古屋市地下鉄)", "--json", "--no-cache"]);
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["data"]["matched_count"], 1);
+}
+
+#[test]
+fn endpoint_errors_identify_the_argument_and_keep_retry_conditions() {
+    let server = Server::new(|request| {
+        if request.contains("StationInfos") {
+            Response::json(
+                r#"[{"station_cd":"1","station_div":"1","station_name":"藤が丘","latitude":35,"longitude":137},{"station_cd":"2","station_div":"2","station_name":"藤が丘","latitude":35,"longitude":137}]"#,
+            )
+        } else {
+            teiki_response(request)
+        }
+    });
+    let out = server.run(&[
+        "route",
+        "藤が丘(名古屋市地下鉄)",
+        "藤が丘",
+        "--at",
+        "09:00",
+        "--via",
+        "栄",
+        "--json",
+        "--no-cache",
+    ]);
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["errors"][0]["scope"], "route.to");
+    assert_eq!(
+        value["errors"][0]["candidates"].as_array().unwrap().len(),
+        2
+    );
+    let text = String::from_utf8_lossy(&out.stderr);
+    assert!(text.contains("nkotsu route '藤が丘(名古屋市地下鉄)' '藤が丘(名古屋市バス)' --at 09:00 --via '栄' --json --no-cache"), "{text}");
+    for command in ["fare", "pass"] {
+        let out = server.run(&[
+            command,
+            "藤が丘(名古屋市地下鉄)",
+            "名古屋(名古屋市地下鉄)",
+            "--json",
+            "--no-cache",
+        ]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
+fn qualified_names_select_exact_facilities_and_ambiguity_is_structured() {
+    let server = Server::new(place_response);
+    let out = server.run(&["coordinates", "駅(名古屋市地下鉄)", "--json", "--no-cache"]);
+    assert_eq!(out.status.code(), Some(3));
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(value["errors"][0]["code"], "not_found");
+    let out = server.run(&["coordinates", "藤が丘", "--json", "--no-cache"]);
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        value["errors"][0]["candidates"],
+        serde_json::json!([
+            {"name":"藤が丘","qualified_name":"藤が丘(名古屋市バス)","type":"bus"},
+            {"name":"藤が丘","qualified_name":"藤が丘(名古屋市地下鉄)","type":"subway"}
+        ])
+    );
+}
+
+#[test]
+fn discovery_commands_have_unambiguous_names_and_radius_options() {
+    let server = Server::new(place_response);
+    for args in [
+        vec!["coordinates", "上社", "--type", "bus"],
+        vec!["subway", "station", "藤が丘"],
+        vec![
+            "nearby",
+            "藤が丘",
+            "--origin-type",
+            "subway",
+            "--result-type",
+            "bus",
+            "--no-radius",
+        ],
+    ] {
+        let out = server.run(&args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    for args in [
+        vec!["location", "上社"],
+        vec!["station", "藤が丘"],
+        vec!["nearby", "上社", "--type", "bus"],
+        vec!["nearby", "上社", "--radius", "500", "--no-radius"],
+    ] {
+        assert_eq!(server.run(&args).status.code(), Some(2));
+    }
+}
+
 #[test]
 fn location_resolves_facilities_without_exposing_internal_ids() {
     let server = Server::new(place_response);
-    let out = server.run(&["location", "藤が丘(名古屋市地下鉄)", "--json", "--no-cache"]);
+    let out = server.run(&[
+        "coordinates",
+        "藤が丘(名古屋市地下鉄)",
+        "--json",
+        "--no-cache",
+    ]);
     assert!(
         out.status.success(),
         "{}",
@@ -31,13 +579,16 @@ fn location_resolves_facilities_without_exposing_internal_ids() {
             "data":{"name":"藤が丘","qualified_name":"藤が丘(名古屋市地下鉄)","type":"subway","latitude":35.182355,"longitude":137.021418}
         })
     );
-    let out = server.run(&["location", "藤が丘", "--json", "--no-cache"]);
+    let out = server.run(&["coordinates", "藤が丘", "--json", "--no-cache"]);
     assert_eq!(out.status.code(), Some(3));
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["errors"][0]["code"], "ambiguous");
-    let out = server.run(&["location", "上社", "--type", "bus", "--no-cache"]);
+    let out = server.run(&["coordinates", "上社", "--type", "bus", "--no-cache"]);
     assert!(out.status.success());
-    assert!(String::from_utf8_lossy(&out.stdout).contains("上社 [市バス]\n緯度: 35.18\n経度: 137"));
+    assert!(
+        String::from_utf8_lossy(&out.stdout)
+            .contains("上社 [市バス] の代表座標\n緯度: 35.18\n経度: 137")
+    );
 }
 
 #[test]
@@ -57,7 +608,7 @@ fn location_keeps_name_identity_when_coordinates_are_invalid_or_missing() {
         ("Ｆ駅", Some("subway"), 5, "invalid_response"),
         ("存在しない", None, 3, "not_found"),
     ] {
-        let mut args = vec!["location", name, "--json", "--no-cache"];
+        let mut args = vec!["coordinates", name, "--json", "--no-cache"];
         if let Some(kind) = kind {
             args.extend(["--type", kind]);
         }
@@ -69,7 +620,7 @@ fn location_keeps_name_identity_when_coordinates_are_invalid_or_missing() {
     }
     assert!(
         server
-            .run(&["location", "上社", "--type", "bus", "--no-cache"])
+            .run(&["coordinates", "上社", "--type", "bus", "--no-cache"])
             .status
             .success()
     );
@@ -79,7 +630,7 @@ fn location_keeps_name_identity_when_coordinates_are_invalid_or_missing() {
 fn location_validates_types_before_fetching_and_raw_keeps_all_master_bodies() {
     let server = Server::new(place_response);
     let out = server.run(&[
-        "location",
+        "coordinates",
         "藤が丘(名古屋市地下鉄)",
         "--type",
         "bus",
@@ -88,20 +639,20 @@ fn location_validates_types_before_fetching_and_raw_keeps_all_master_bodies() {
     ]);
     assert_eq!(out.status.code(), Some(2));
     assert!(server.requests.lock().unwrap().is_empty());
-    let out = server.run(&["location", "駅 (名古屋市地下鉄)", "--json", "--no-cache"]);
+    let out = server.run(&["coordinates", "駅 (名古屋市地下鉄)", "--json", "--no-cache"]);
     assert_eq!(out.status.code(), Some(3));
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert!(
-        value["errors"][0]["message"]
-            .as_str()
-            .unwrap()
-            .contains("Ｆ駅(名古屋市地下鉄)")
-    );
-    let out = server.run(&["location", "F駅(名古屋市地下鉄)", "--json", "--no-cache"]);
+    assert_eq!(value["errors"][0]["code"], "not_found");
+    let out = server.run(&["coordinates", "F駅(名古屋市地下鉄)", "--json", "--no-cache"]);
     assert!(out.status.success());
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["data"]["name"], "Ｆ駅");
-    let out = server.run(&["location", "藤が丘(名古屋市地下鉄)", "--raw", "--no-cache"]);
+    let out = server.run(&[
+        "coordinates",
+        "藤が丘(名古屋市地下鉄)",
+        "--raw",
+        "--no-cache",
+    ]);
     assert!(out.status.success());
     let raw: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(raw.as_object().unwrap().len(), 3);
@@ -113,7 +664,10 @@ fn location_validates_types_before_fetching_and_raw_keeps_all_master_bodies() {
         place_response("station_latlng.json").body
     );
     assert_eq!(
-        server.run(&["location", "F駅", "--no-cache"]).status.code(),
+        server
+            .run(&["coordinates", "F駅", "--no-cache"])
+            .status
+            .code(),
         Some(0)
     );
 }
@@ -130,7 +684,12 @@ fn location_requires_all_masters_and_rejects_conflicting_coordinates() {
                 place_response(request)
             }
         });
-        let out = server.run(&["location", "藤が丘(名古屋市地下鉄)", "--json", "--no-cache"]);
+        let out = server.run(&[
+            "coordinates",
+            "藤が丘(名古屋市地下鉄)",
+            "--json",
+            "--no-cache",
+        ]);
         assert_eq!(out.status.code(), Some(4));
         let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
         assert!(value["data"].is_null());
@@ -146,7 +705,7 @@ fn location_requires_all_masters_and_rejects_conflicting_coordinates() {
     });
     assert_eq!(
         server
-            .run(&["location", "藤が丘(名古屋市地下鉄)", "--no-cache"])
+            .run(&["coordinates", "藤が丘(名古屋市地下鉄)", "--no-cache"])
             .status
             .code(),
         Some(5)
@@ -161,7 +720,7 @@ fn nearby_returns_rounded_straight_line_distances_and_preserves_other_facility_t
         "藤が丘",
         "--origin-type",
         "subway",
-        "--type",
+        "--result-type",
         "bus",
         "--limit",
         "1",
@@ -194,7 +753,13 @@ fn nearby_filters_unrounded_radius_before_limit_and_sorts_public_distance_ties()
             r#"[{"name":"基準(名古屋市地下鉄)","lat":0,"lng":0},{"name":"基準(名古屋市バス)","lat":0,"lng":0},{"name":"Ａ近","lat":0,"lng":0.000009},{"name":"Ｂ近","lat":0,"lng":0.0000085},{"name":"半径端","lat":0.0045,"lng":0},{"name":"遠","lat":0,"lng":1}]"#
         })
     });
-    let out = server.run(&["nearby", "基準(名古屋市地下鉄)", "--json", "--no-cache"]);
+    let out = server.run(&[
+        "nearby",
+        "基準(名古屋市地下鉄)",
+        "--no-radius",
+        "--json",
+        "--no-cache",
+    ]);
     assert!(out.status.success());
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let places = value["data"]["places"].as_array().unwrap();
@@ -240,7 +805,7 @@ fn nearby_filters_unrounded_radius_before_limit_and_sorts_public_distance_ties()
     let out = server.run(&[
         "nearby",
         "基準(名古屋市地下鉄)",
-        "--type",
+        "--result-type",
         "subway",
         "--no-cache",
     ]);
@@ -275,7 +840,7 @@ fn nearby_reports_invalid_candidates_even_outside_radius_or_limit() {
     let out = server.run(&[
         "nearby",
         "基準",
-        "--type",
+        "--result-type",
         "bus",
         "--radius",
         "1",
@@ -313,12 +878,12 @@ fn search_aggregates_suggestions_without_publishing_bus_ids_or_platforms() {
     );
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["data"]["query"], "藤が丘");
-    assert_eq!(value["data"]["total"], 3);
+    assert_eq!(value["data"]["retrieved_count"], 3);
     assert_eq!(value["data"]["results"].as_array().unwrap().len(), 2);
     assert_eq!(value["data"]["results"][0]["type"], "bus");
     assert_eq!(value["data"]["results"][0]["codes"], serde_json::json!([]));
     assert_eq!(
-        value["data"]["results"][0]["lines"],
+        value["data"]["results"][0]["reported_lines"],
         serde_json::json!(["藤丘11", "藤丘12"])
     );
     assert_eq!(
@@ -338,7 +903,13 @@ fn search_aggregates_suggestions_without_publishing_bus_ids_or_platforms() {
 #[test]
 fn station_keeps_codes_and_optional_coordinates_and_accepts_qualified_nfkc_names() {
     let server = Server::new(place_response);
-    let out = server.run(&["station", " F駅(名古屋市地下鉄) ", "--json", "--no-cache"]);
+    let out = server.run(&[
+        "subway",
+        "station",
+        " F駅(名古屋市地下鉄) ",
+        "--json",
+        "--no-cache",
+    ]);
     assert!(
         out.status.success(),
         "{}",
@@ -348,17 +919,17 @@ fn station_keeps_codes_and_optional_coordinates_and_accepts_qualified_nfkc_names
     assert_eq!(value["data"]["name"], "Ｆ駅");
     assert_eq!(value["data"]["codes"], serde_json::json!(["H08", "S02"]));
     assert!(value["data"].get("id").is_none());
-    let out = server.run(&["station", "藤が丘", "--no-cache"]);
+    let out = server.run(&["subway", "station", "藤が丘", "--no-cache"]);
     assert!(out.status.success());
     assert!(
         String::from_utf8_lossy(&out.stdout)
             .contains("駅記号: H22\n緯度: 35.182355\n経度: 137.021418")
     );
-    let out = server.run(&["station", "F駅前", "--json", "--no-cache"]);
+    let out = server.run(&["subway", "station", "F駅前", "--json", "--no-cache"]);
     assert!(out.status.success());
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(value["data"]["latitude"].is_null() && value["data"]["longitude"].is_null());
-    let out = server.run(&["station", "藤が丘", "--raw", "--no-cache"]);
+    let out = server.run(&["subway", "station", "藤が丘", "--raw", "--no-cache"]);
     let raw: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(raw.as_object().unwrap().len(), 2);
     assert_eq!(
@@ -369,11 +940,17 @@ fn station_keeps_codes_and_optional_coordinates_and_accepts_qualified_nfkc_names
         place_response("station_latlng.json").body
     );
     assert_eq!(
-        server.run(&["station", "駅", "--no-cache"]).status.code(),
+        server
+            .run(&["subway", "station", "駅", "--no-cache"])
+            .status
+            .code(),
         Some(3)
     );
     assert_eq!(
-        server.run(&["station", "未知", "--no-cache"]).status.code(),
+        server
+            .run(&["subway", "station", "未知", "--no-cache"])
+            .status
+            .code(),
         Some(3)
     );
 }
@@ -401,7 +978,7 @@ fn search_distinguishes_partial_fetches_total_failure_and_successful_empty_resul
         assert_eq!(!value["data"].is_null(), data_present);
         assert_eq!(value["errors"].as_array().unwrap().len(), errors);
         if data_present {
-            assert_eq!(value["data"]["total"], 0);
+            assert_eq!(value["data"]["retrieved_count"], 0);
         }
         let failing_kind = if bus_status == 400 { "bus" } else { "subway" };
         let out = server.run(&[
@@ -420,7 +997,7 @@ fn search_distinguishes_partial_fetches_total_failure_and_successful_empty_resul
     let out = server.run(&["search", "未知", "--json", "--no-cache"]);
     assert!(out.status.success());
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(value["data"]["total"], 0);
+    assert_eq!(value["data"]["retrieved_count"], 0);
     assert_eq!(value["complete"], true);
 }
 
@@ -445,7 +1022,7 @@ fn search_preserves_names_when_coordinates_fail_and_drops_unidentifiable_candida
     assert_eq!(out.status.code(), Some(5));
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["complete"], false);
-    assert_eq!(value["data"]["total"], 5);
+    assert_eq!(value["data"]["retrieved_count"], 5);
     assert_eq!(value["errors"].as_array().unwrap().len(), 5);
     for place in value["data"]["results"].as_array().unwrap() {
         if place["name"] == "正常" {
@@ -466,12 +1043,12 @@ fn search_preserves_names_when_coordinates_fail_and_drops_unidentifiable_candida
     ]);
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["errors"].as_array().unwrap().len(), 5);
-    assert_eq!(value["data"]["total"], 5);
+    assert_eq!(value["data"]["retrieved_count"], 5);
     assert_eq!(value["data"]["results"].as_array().unwrap().len(), 1);
     let server = Server::new(|_| Response::json(r#"[{"station_name":"不正"}]"#));
     let out = server.run(&["search", "不正", "--type", "subway", "--json", "--no-cache"]);
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(value["data"]["total"], 0);
+    assert_eq!(value["data"]["retrieved_count"], 0);
     assert_eq!(value["complete"], false);
     assert_eq!(out.status.code(), Some(5));
 }
@@ -517,9 +1094,15 @@ fn place_index_keeps_master_names_that_collide_after_normalization() {
             Response::json(r#"[{"name":"Ｆ駅(名古屋市地下鉄)","lat":35,"lng":137}]"#)
         }
     });
-    for command in ["location", "nearby", "station"] {
-        let out = server.run(&[command, "F駅(名古屋市地下鉄)", "--json", "--no-cache"]);
-        assert_eq!(out.status.code(), Some(3), "{command}");
+    for command in [
+        vec!["coordinates"],
+        vec!["nearby"],
+        vec!["subway", "station"],
+    ] {
+        let mut args = command.clone();
+        args.extend(["F駅(名古屋市地下鉄)", "--json", "--no-cache"]);
+        let out = server.run(&args);
+        assert_eq!(out.status.code(), Some(3), "{command:?}");
         let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(value["errors"][0]["code"], "ambiguous");
     }
@@ -535,11 +1118,14 @@ fn search_retains_identifiable_facilities_with_invalid_codes_or_lines() {
     let out = server.run(&["search", "駅", "--type", "subway", "--json", "--no-cache"]);
     assert_eq!(out.status.code(), Some(5));
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(value["data"]["total"], 1);
+    assert_eq!(value["data"]["retrieved_count"], 1);
     assert_eq!(value["data"]["results"][0]["name"], "駅");
     assert_eq!(value["data"]["results"][0]["latitude"], 35.0);
     assert_eq!(value["data"]["results"][0]["codes"], serde_json::json!([]));
-    assert_eq!(value["data"]["results"][0]["lines"], serde_json::json!([]));
+    assert_eq!(
+        value["data"]["results"][0]["reported_lines"],
+        serde_json::json!([])
+    );
     assert_eq!(value["errors"].as_array().unwrap().len(), 2);
 }
 
@@ -549,8 +1135,8 @@ fn place_arguments_fail_before_network_requests() {
     for args in [
         vec!["search", ""],
         vec!["search", "　 "],
-        vec!["location", " (名古屋市地下鉄)"],
-        vec!["station", " (名古屋市地下鉄)"],
+        vec!["coordinates", " (名古屋市地下鉄)"],
+        vec!["subway", "station", " (名古屋市地下鉄)"],
         vec!["search", "駅", "--limit", "0"],
         vec!["search", "駅", "--type", "train"],
         vec!["nearby", "駅", "--radius", "0"],
@@ -599,7 +1185,7 @@ fn station_retains_basic_information_on_coordinate_errors_but_requires_its_maste
                 place_response(request)
             }
         });
-        let out = server.run(&["station", "藤が丘", "--json", "--no-cache"]);
+        let out = server.run(&["subway", "station", "藤が丘", "--json", "--no-cache"]);
         assert_eq!(out.status.code(), Some(exit_code));
         let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(value["complete"], complete);
@@ -611,7 +1197,7 @@ fn station_retains_basic_information_on_coordinate_errors_but_requires_its_maste
         r.status = 400;
         r
     });
-    let out = server.run(&["station", "藤が丘", "--json", "--no-cache"]);
+    let out = server.run(&["subway", "station", "藤が丘", "--json", "--no-cache"]);
     assert_eq!(out.status.code(), Some(4));
     assert!(serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()["data"].is_null());
 }
@@ -637,20 +1223,24 @@ fn place_commands_share_master_cache_and_refresh_conditionally() {
             .unwrap()
     };
     for args in [
-        vec!["station", "藤が丘"],
-        vec!["location", "藤が丘(名古屋市地下鉄)"],
-        vec!["nearby", "藤が丘(名古屋市地下鉄)", "--type", "bus"],
+        vec!["subway", "station", "藤が丘"],
+        vec!["coordinates", "藤が丘(名古屋市地下鉄)"],
+        vec!["nearby", "藤が丘(名古屋市地下鉄)", "--result-type", "bus"],
     ] {
         assert!(run(&args).status.success());
     }
     assert_eq!(server.requests.lock().unwrap().len(), 3);
     assert!(
-        run(&["location", "藤が丘(名古屋市地下鉄)", "--refresh"])
+        run(&["coordinates", "藤が丘(名古屋市地下鉄)", "--refresh"])
             .status
             .success()
     );
     assert_eq!(server.requests.lock().unwrap().len(), 6);
-    assert!(run(&["station", "藤が丘", "--no-cache"]).status.success());
+    assert!(
+        run(&["subway", "station", "藤が丘", "--no-cache"])
+            .status
+            .success()
+    );
     assert_eq!(server.requests.lock().unwrap().len(), 8);
     for file in std::fs::read_dir(&cache).unwrap() {
         std::fs::remove_file(file.unwrap().path()).unwrap();
@@ -671,25 +1261,25 @@ fn place_index_does_not_guess_unqualified_shared_names_or_merge_other_transport_
     });
     assert_eq!(
         server
-            .run(&["location", "藤が丘", "--no-cache"])
+            .run(&["coordinates", "藤が丘", "--no-cache"])
             .status
             .code(),
         Some(3)
     );
     assert_eq!(
         server
-            .run(&["location", "藤が丘", "--type", "subway", "--no-cache"])
+            .run(&["coordinates", "藤が丘", "--type", "subway", "--no-cache"])
             .status
             .code(),
         Some(5)
     );
     assert!(
         server
-            .run(&["location", "上社", "--type", "bus", "--no-cache"])
+            .run(&["coordinates", "上社", "--type", "bus", "--no-cache"])
             .status
             .success()
     );
-    let out = server.run(&["location", "金屋", "--json", "--no-cache"]);
+    let out = server.run(&["coordinates", "金屋", "--json", "--no-cache"]);
     assert!(out.status.success());
     let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(value["data"]["qualified_name"], "金屋(名古屋市バス)");
@@ -1599,11 +2189,11 @@ fn help_explains_purpose_examples_constraints_and_docs() {
             ],
         ),
         (
-            vec!["station", "--help"],
+            vec!["subway", "station", "--help"],
             vec!["駅記号", "docs show places"],
         ),
         (
-            vec!["location", "--help"],
+            vec!["coordinates", "--help"],
             vec!["現在位置", "--type <TYPE>", "docs show places"],
         ),
         (
@@ -1650,8 +2240,8 @@ fn help_explains_purpose_examples_constraints_and_docs() {
         vec!["pass"],
         vec!["delay-cert"],
         vec!["search"],
-        vec!["station"],
-        vec!["location"],
+        vec!["subway", "station"],
+        vec!["coordinates"],
         vec!["nearby"],
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_nkotsu"))
