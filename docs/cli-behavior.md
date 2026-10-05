@@ -2,7 +2,9 @@
 
 ## 対象コマンド
 
-実装言語はRust、Cargo packageは `nagoya-kotsu-cli`、バイナリ名は `nkotsu` とする。v0.2.0は `status`、`bus stop`、`bus timetable`、`bus live`、`subway timetable`、`subway next`、`route`、`fare`、`pass`、`delay-cert` を対象とする。v0.1.0の既存コマンド・JSON構造・終了コードは維持する。新機能の仕様は [普通運賃](cli/fare.md)、[定期券料金](cli/pass.md)、[延着証明書](cli/delay-cert.md) に記録している。
+実装言語はRust、Cargo packageは `nagoya-kotsu-cli`、バイナリ名は `nkotsu` とする。v0.2.0は `status`、`bus stop`、`bus timetable`、`bus live`、`subway timetable`、`subway next`、`route`、`fare`、`pass`、`delay-cert` を対象とする。
+
+v0.1.0の既存コマンド・JSON構造・終了コードは維持する。追加機能の仕様は [普通運賃](cli/fare.md)、[定期券料金](cli/pass.md)、[延着証明書](cli/delay-cert.md) に記録している。
 
 ## 設計上の決定
 
