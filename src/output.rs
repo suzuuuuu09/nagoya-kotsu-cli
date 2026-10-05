@@ -5,8 +5,20 @@ pub fn human(result: &ResultData, details: bool) -> String {
     match &result.data {
         Data::Empty => {}
         Data::Documents(documents) => {
+            let width = documents
+                .iter()
+                .map(|document| document.name.len())
+                .max()
+                .unwrap_or(0);
+
             for document in documents {
-                let _ = writeln!(out, "{}  {}", document.name, document.summary);
+                let _ = writeln!(
+                    out,
+                    "{:<width$}  {}",
+                    document.name,
+                    document.summary,
+                    width = width
+                );
             }
         }
         Data::Document(document) => return document.content.unwrap_or_default().to_owned(),
