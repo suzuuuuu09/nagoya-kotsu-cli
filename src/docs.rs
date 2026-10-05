@@ -13,7 +13,7 @@ pub struct Document {
     pub content: Option<&'static str>,
 }
 
-const DOCUMENTS: [Document; 8] = [
+const DOCUMENTS: [Document; 9] = [
     Document {
         name: "bus",
         summary: "市バスの停留所・時刻表・接近情報",
@@ -43,6 +43,11 @@ const DOCUMENTS: [Document; 8] = [
         name: "delay-cert",
         summary: "延着証明書と証明対象日",
         content: Some(include_str!("../docs/cli/delay-cert.md")),
+    },
+    Document {
+        name: "places",
+        summary: "駅・バス停の検索・基本情報・座標・周辺検索",
+        content: Some(include_str!("../docs/cli/places.md")),
     },
     Document {
         name: "output",

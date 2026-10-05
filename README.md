@@ -1,6 +1,6 @@
 # nagoya-kotsu-cli
 
-名古屋市交通局の市バス・地下鉄情報を取得するRust製CLIです。バイナリ名は `nkotsu` で、v0.2.0では運行情報、停留所、時刻表、接近情報、経路検索、普通運賃、定期券料金、延着証明書を利用できます。
+名古屋市交通局の市バス・地下鉄情報を取得するRust製CLIです。バイナリ名は `nkotsu` で、v0.3.0では運行情報、停留所、時刻表、接近情報、経路検索、普通運賃、定期券料金、延着証明書に加え、駅・バス停の検索、地下鉄駅情報、座標、周辺検索を利用できます。
 
 ## インストール
 
@@ -163,6 +163,44 @@ nkotsu delay-cert --date 2026-09-08 --limit 5 --json
 
 一覧に現在の運行情報は含まれないため、証明書が0件でも現在の正常運行を意味しません。検索と出力の詳細は `nkotsu docs show delay-cert` を参照してください。
 
+### 駅・バス停検索: `search`
+
+市バス停と地下鉄駅を横断検索します。`--type` で種別、`--limit` で件数を指定できます。候補は自動選択せず、返された `qualified_name` で同名施設を区別します。
+
+```sh
+nkotsu search 藤が丘
+nkotsu search 藤が丘 --type subway --limit 5 --json
+```
+
+### 地下鉄駅情報: `station`
+
+地下鉄駅の名前・駅記号・代表座標を表示します。座標が取得できない場合も、正常な駅情報を保持します。
+
+```sh
+nkotsu station 藤が丘
+nkotsu station 名古屋 --json
+```
+
+### 座標: `location`
+
+交通施設の代表座標を取得します。利用者や端末の現在位置は取得しません。同名施設は完全修飾名か `--type` で指定します。
+
+```sh
+nkotsu location '藤が丘(名古屋市地下鉄)'
+nkotsu location 上社 --type bus --json
+```
+
+### 周辺検索: `nearby`
+
+指定施設から近い駅・バス停を検索します。`--origin-type` は基準地点、`--type` は結果の種別を指定します。距離は概算直線距離であり、徒歩距離・徒歩時間ではありません。
+
+```sh
+nkotsu nearby 藤が丘 --origin-type subway --type bus
+nkotsu nearby 栄 --origin-type subway --radius 500 --limit 5 --json
+```
+
+詳しい検索・座標検証・部分失敗の仕様は `nkotsu docs show places` を参照してください。
+
 ### 名前の検索と候補の選択
 
 名前はNFKC正規化し、完全一致する候補を優先して検索します。完全一致する候補がなければ部分一致で検索し、候補が複数あれば候補を表示して終了します。
@@ -180,7 +218,7 @@ nkotsu docs show bus
 nkotsu docs show output --json
 ```
 
-`docs list` は文書名と概要を一覧表示し、`docs show <name>` は指定した文書のMarkdown本文を表示します。文書名は `bus`、`subway`、`route`、`fare`、`pass`、`delay-cert`、`output`、`troubleshooting` です。
+`docs list` は文書名と概要を一覧表示し、`docs show <name>` は指定した文書のMarkdown本文を表示します。文書名は `bus`、`subway`、`route`、`fare`、`pass`、`delay-cert`、`places`、`output`、`troubleshooting` です。
 
 `--json` を指定すると、`list` は名前・概要の一覧、`show` は名前・概要・本文をJSONで返します。APIの生レスポンスを取得するコマンドではないため、docsでの `--raw` 指定は引数エラーになります。
 

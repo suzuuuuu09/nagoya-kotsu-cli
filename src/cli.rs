@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     name = "nkotsu",
     version,
     about = "名古屋市交通局の市バス・地下鉄情報を取得するCLI",
-    after_help = "Examples:\n  nkotsu status\n  nkotsu bus live 上社\n  nkotsu subway next 藤が丘\n  nkotsu route 藤が丘 名古屋 --subway\n  nkotsu route 藤が丘 名古屋 --subway --json\n  nkotsu fare 藤が丘 名古屋\n  nkotsu pass 藤が丘 名古屋 --type 大学生 --months 1\n  nkotsu delay-cert --line 東山線\n\nNotes:\n  --json と --raw は同時指定できません。エラー・警告・診断はstderrへ出します。\n\nDetailed documentation:\n  nkotsu docs list\n  nkotsu docs show <name>",
+    after_help = "Examples:\n  nkotsu status\n  nkotsu bus live 上社\n  nkotsu subway next 藤が丘\n  nkotsu route 藤が丘 名古屋 --subway\n  nkotsu route 藤が丘 名古屋 --subway --json\n  nkotsu fare 藤が丘 名古屋\n  nkotsu pass 藤が丘 名古屋 --type 大学生 --months 1\n  nkotsu delay-cert --line 東山線\n  nkotsu search 藤が丘\n  nkotsu station 藤が丘\n  nkotsu location '藤が丘(名古屋市地下鉄)'\n  nkotsu nearby 藤が丘 --origin-type subway\n\nNotes:\n  --json と --raw は同時指定できません。エラー・警告・診断はstderrへ出します。\n\nDetailed documentation:\n  nkotsu docs list\n  nkotsu docs show <name>",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -119,6 +119,33 @@ pub enum Command {
     )]
     DelayCert(DelayCert),
     #[command(
+        about = "駅・バス停を検索",
+        long_about = "市バス・地下鉄を横断検索し、名前・種別・完全修飾名を返します。所属路線を網羅する一覧ではありません。",
+        after_help = "Examples:\n  nkotsu search 藤が丘\n  nkotsu search 藤が丘 --type subway --limit 5 --json\n\nNotes:\n  複数候補を自動選択しません。次のコマンドへ渡す候補を選んでください。\n\nMore:\n  nkotsu docs show places"
+    )]
+    Search(Search),
+    #[command(
+        about = "地下鉄駅の基本情報を表示",
+        long_about = "地下鉄駅の名前・駅記号・代表座標を表示します。市バス停の詳細は bus stop を使用してください。",
+        after_help = "Examples:\n  nkotsu station 藤が丘\n  nkotsu station 名古屋 --json\n\nMore:\n  nkotsu docs show places"
+    )]
+    Station {
+        #[arg(help = "地下鉄駅名または完全修飾名", value_name = "STATION")]
+        station: String,
+    },
+    #[command(
+        about = "駅・バス停の座標を表示",
+        long_about = "交通局に登録された駅・バス停の代表座標を表示します。利用者や端末の現在位置を取得するコマンドではありません。",
+        after_help = "Examples:\n  nkotsu location '藤が丘(名古屋市地下鉄)'\n  nkotsu location 上社 --type bus --json\n\nMore:\n  nkotsu docs show places"
+    )]
+    Location(Location),
+    #[command(
+        about = "周辺の駅・バス停を検索",
+        long_about = "指定した交通施設を基準に周辺の駅・バス停を探します。距離は徒歩距離ではなく概算直線距離です。端末の現在位置は取得しません。",
+        after_help = "Examples:\n  nkotsu nearby '藤が丘(名古屋市地下鉄)'\n  nkotsu nearby 藤が丘 --origin-type subway --type bus\n  nkotsu nearby 栄 --origin-type subway --radius 500 --limit 5 --json\n\nMore:\n  nkotsu docs show places"
+    )]
+    Nearby(Nearby),
+    #[command(
         about = "nkotsuの詳細ドキュメントを表示",
         long_about = "バイナリに内蔵された詳細ドキュメントを表示します。通信や永続キャッシュは使用しません。",
         after_help = "Examples:\n  nkotsu docs list\n  nkotsu docs show output\n\nNotes:\n  --json で文書を機械処理向けに取得できます。--raw は使用できません。\n\nMore:\n  nkotsu docs show output"
@@ -137,6 +164,73 @@ pub struct Status {
     pub bus: bool,
     #[arg(long, help = "地下鉄の運行情報に絞り込み（両方指定では絞り込まない）")]
     pub subway: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum PlaceType {
+    Bus,
+    Subway,
+}
+impl PlaceType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bus => "bus",
+            Self::Subway => "subway",
+        }
+    }
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Self::Bus => "名古屋市バス",
+            Self::Subway => "名古屋市地下鉄",
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct Location {
+    #[arg(help = "駅・バス停名または完全修飾名", value_name = "PLACE")]
+    pub place: String,
+    #[arg(
+        long = "type",
+        value_enum,
+        help = "地点種別で絞り込む",
+        value_name = "TYPE"
+    )]
+    pub kind: Option<PlaceType>,
+}
+
+#[derive(Debug, Args)]
+pub struct Nearby {
+    #[arg(help = "基準となる駅・バス停名または完全修飾名", value_name = "PLACE")]
+    pub place: String,
+    #[arg(long, value_enum, help = "基準地点の種別", value_name = "TYPE")]
+    pub origin_type: Option<PlaceType>,
+    #[arg(
+        long = "type",
+        value_enum,
+        help = "検索結果の種別",
+        value_name = "TYPE"
+    )]
+    pub kind: Option<PlaceType>,
+    #[arg(long, help = "最大直線距離（メートル、1以上、省略時は制限なし）", value_name = "METERS", value_parser = clap::value_parser!(u32).range(1..))]
+    pub radius: Option<u32>,
+    #[arg(long, help = "表示件数（1以上）", value_name = "N", default_value = "10", value_parser = clap::value_parser!(u32).range(1..))]
+    pub limit: u32,
+}
+
+#[derive(Debug, Args)]
+pub struct Search {
+    #[arg(help = "検索する駅・バス停名", value_name = "QUERY")]
+    pub query: String,
+    #[arg(
+        long = "type",
+        value_enum,
+        help = "検索する地点種別",
+        value_name = "TYPE"
+    )]
+    pub kind: Option<PlaceType>,
+    #[arg(long, help = "表示件数（1以上）", value_name = "N", default_value = "20", value_parser = clap::value_parser!(u32).range(1..))]
+    pub limit: u32,
 }
 
 #[derive(Debug, Args)]

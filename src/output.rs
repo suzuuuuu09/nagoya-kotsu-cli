@@ -4,6 +4,79 @@ pub fn human(result: &ResultData, details: bool, quiet: bool) -> String {
     use std::fmt::Write;
     match &result.data {
         Data::Empty => {}
+        Data::Location(place) => {
+            let _ = writeln!(
+                out,
+                "{} [{}]\n緯度: {}\n経度: {}",
+                place.name,
+                kind_label(&place.kind),
+                place.latitude,
+                place.longitude
+            );
+        }
+        Data::Nearby(data) => {
+            let _ = writeln!(
+                out,
+                "{} [{}] 周辺",
+                data.origin.name,
+                kind_label(&data.origin.kind)
+            );
+            if data.places.is_empty() {
+                let _ = writeln!(out, "該当する周辺の交通施設はありません");
+            }
+            for (i, place) in data.places.iter().enumerate() {
+                let _ = writeln!(
+                    out,
+                    "{}. {} [{}]  {}m",
+                    i + 1,
+                    place.location.name,
+                    kind_label(&place.location.kind),
+                    place.distance_m
+                );
+            }
+        }
+        Data::Search(data) => {
+            let _ = writeln!(out, "{}", data.query);
+            if data.results.is_empty() {
+                let _ = writeln!(out, "該当する駅・バス停はありません");
+            }
+            for (i, place) in data.results.iter().enumerate() {
+                let _ = writeln!(
+                    out,
+                    "\n{}. {} [{}]",
+                    i + 1,
+                    place.name,
+                    kind_label(&place.kind)
+                );
+                let info: Vec<_> = [&place.codes, &place.lines]
+                    .into_iter()
+                    .filter(|v| !v.is_empty())
+                    .map(|v| v.join(" / "))
+                    .collect();
+                if !info.is_empty() {
+                    let _ = writeln!(out, "   {}", info.join(" / "));
+                }
+                let _ = writeln!(out, "   {}", place.qualified_name);
+            }
+        }
+        Data::Station(station) => {
+            let latitude = station
+                .latitude
+                .map(|v| v.to_string())
+                .unwrap_or("不明".into());
+            let longitude = station
+                .longitude
+                .map(|v| v.to_string())
+                .unwrap_or("不明".into());
+            let _ = writeln!(
+                out,
+                "{}\n駅記号: {}\n緯度: {}\n経度: {}",
+                station.name,
+                station.codes.join(" / "),
+                latitude,
+                longitude
+            );
+        }
         Data::Fare(fare) => {
             let _ = writeln!(out, "{} → {}", fare.from, fare.to);
             if fare.routes.is_empty() {
@@ -213,4 +286,12 @@ pub fn human(result: &ResultData, details: bool, quiet: bool) -> String {
         }
     }
     out
+}
+
+fn kind_label(kind: &str) -> &str {
+    match kind {
+        "bus" => "市バス",
+        "subway" => "地下鉄",
+        _ => kind,
+    }
 }

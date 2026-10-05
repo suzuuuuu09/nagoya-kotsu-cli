@@ -7,6 +7,7 @@ use serde::{Deserialize, Deserializer};
 use unicode_normalization::UnicodeNormalization;
 pub mod bus;
 pub mod delay_cert;
+pub mod place;
 pub mod route;
 pub mod subway;
 pub mod teiki;

@@ -9,6 +9,7 @@ pub mod bus;
 pub mod delay_cert;
 pub mod fare;
 pub mod pass;
+pub mod places;
 pub mod route;
 pub mod subway;
 
@@ -21,6 +22,10 @@ pub async fn run(client: &ApiClient, command: &Command) -> Result<ResultData, Er
         Command::Fare(options) => fare::run(client, options).await,
         Command::Pass(options) => pass::run(client, options).await,
         Command::DelayCert(options) => delay_cert::run(client, options).await,
+        Command::Location(options) => places::location(client, options).await,
+        Command::Nearby(options) => places::nearby(client, options).await,
+        Command::Search(options) => places::search(client, options).await,
+        Command::Station { station } => places::station(client, station).await,
         Command::Docs { command } => crate::docs::run(command),
     }
 }

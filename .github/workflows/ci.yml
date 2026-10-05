@@ -28,10 +28,15 @@ jobs:
         run: cargo fmt --check
 
       - name: Run Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Run tests
         run: cargo test --locked
 
       - name: Test release license collection
         run: python3 -m unittest discover -s tests -p release.py
+
+      - name: Verify package
+        env:
+          CARGO_TARGET_DIR: target/package-check
+        run: cargo package --locked

@@ -40,6 +40,59 @@ pub enum Data {
     Fare(FareResult),
     Pass(PassResult),
     DelayCertificates(DelayCertificates),
+    Location(PlaceLocation),
+    Nearby(NearbyResult),
+    Search(SearchResult),
+    Station(StationInfo),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PlaceLocation {
+    pub name: String,
+    pub qualified_name: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NearbyResult {
+    pub origin: PlaceLocation,
+    pub places: Vec<NearbyPlace>,
+}
+#[derive(Debug, Serialize)]
+pub struct NearbyPlace {
+    #[serde(flatten)]
+    pub location: PlaceLocation,
+    pub distance_m: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchResult {
+    pub query: String,
+    pub total: usize,
+    pub results: Vec<SearchPlace>,
+}
+#[derive(Debug, Serialize)]
+pub struct SearchPlace {
+    pub name: String,
+    pub qualified_name: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub codes: Vec<String>,
+    pub lines: Vec<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StationInfo {
+    pub name: String,
+    pub qualified_name: String,
+    pub codes: Vec<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
