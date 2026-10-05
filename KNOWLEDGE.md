@@ -1,5 +1,8 @@
 # Project knowledge
 
+**Cargo package include patterns**
+Anchor release `include` patterns with a leading `/`. Unanchored names such as `README.md` and `LICENSE` also match files beneath `.direnv/flake-inputs`, and explicit includes override Git ignore rules. A local package check pulled Nixpkgs files into the archive until the patterns were rooted. Inspect the actual `.crate` file list, not just whether packaging compiles.
+
 **Global output flag conflicts across subcommands**
 Clap's global `conflicts_with` check does not reject every placement of output flags across command levels: `--raw status --json` can parse successfully. Check the parsed `json` and `raw` flags together before creating the API client, so incompatible output modes never trigger a request.
 

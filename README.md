@@ -4,7 +4,15 @@
 
 ## インストール
 
-Rustツールチェーンを用意し、リポジトリのルートで次のコマンドを実行してください。
+crates.ioで公開された版は、Rustツールチェーンで次のようにインストールできます。
+
+```sh
+cargo install nagoya-kotsu-cli --locked
+```
+
+Rust環境を使わない場合は、[GitHub Releases](https://github.com/suzuuuuu09/nagoya-kotsu-cli/releases)に公開されたOS・CPU別のアーカイブを展開し、`nkotsu`（Windowsでは `nkotsu.exe`）をPATHが通ったディレクトリへ配置してください。Linux・macOSは `.tar.gz`、Windowsは `.zip` です。Linux版はUbuntu 24.04上でビルドしたGNU版を配布します。
+
+公開前のコードやローカルの変更を試す場合は、リポジトリのルートでインストールしてください。
 
 ```sh
 cargo install --path . --locked
@@ -210,9 +218,12 @@ nix fmt flake.nix
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --locked
+python3 -m unittest discover -s tests -p release.py
 ```
 
 テストはローカルHTTPサーバーを使い、実際のCLIのstdout、stderr、終了コードを確認します。公式APIにはアクセスしません。テスト・開発用の `NKOTSU_BASE_URL` は全APIの取得先、`NKOTSU_CACHE_DIR` はキャッシュ保存先を上書きします。
+
+リリース補助処理にはPython 3.11以降を使います。Nixの開発環境にもPythonを含めています。タグによる公開と初回認証の設定は、[リリース手順](docs/release.md)を参照してください。
 
 ## 祝日データの更新
 
@@ -221,3 +232,7 @@ cargo test --locked
 ## 内部APIと設計資料
 
 公式サイトの内部APIを利用しており、公開APIとしての互換性保証はありません。実装上の決定は [CLI動作仕様](docs/cli-behavior.md)、用語は [GLOSSARY.md](GLOSSARY.md)、確認したAPI固有の注意点は [KNOWLEDGE.md](KNOWLEDGE.md) に記録しています。
+
+## ライセンス
+
+プロジェクトのコードは [Apache License 2.0](LICENSE) で公開します。同梱の祝日データの出典・加工内容・利用条件は [NOTICE](NOTICE) に記載しています。依存ライブラリにはそれぞれのライセンスが適用され、配布バイナリにはライセンス本文を収録した `THIRD-PARTY-LICENSES.json` を同梱します。

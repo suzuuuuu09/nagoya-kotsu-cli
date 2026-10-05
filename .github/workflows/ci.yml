@@ -32,3 +32,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked
+
+      - name: Test release license collection
+        run: python3 -m unittest discover -s tests -p release.py

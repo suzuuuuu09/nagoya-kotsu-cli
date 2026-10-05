@@ -3,6 +3,10 @@ name = "nagoya-kotsu-cli"
 version = "0.1.0"
 edition = "2024"
 description = "名古屋市交通局の市バス・地下鉄情報を取得するCLI"
+license = "Apache-2.0"
+repository = "https://github.com/suzuuuuu09/nagoya-kotsu-cli"
+readme = "README.md"
+include = ["/src/**", "/tests/*.rs", "/tests/*.py", "/scripts/*.py", "/docs/cli/**", "/data/holidays.txt", "/LICENSE", "/NOTICE", "/README.md", "/Cargo.toml", "/Cargo.lock"]
 
 [[bin]]
 name = "nkotsu"

@@ -27,6 +27,7 @@
               clippy
               rust-analyzer
               nixfmt
+              python3
             ];
           };
         }
