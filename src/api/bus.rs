@@ -371,7 +371,7 @@ pub async fn vehicles(
                     from_stop: index
                         .checked_sub(1)
                         .and_then(|i| route.stops[i].get(..5))
-                        .map(&stop_name),
+                        .map(stop_name),
                     to_stop: Some(stop_name(key)),
                     relation: relation.into(),
                 }

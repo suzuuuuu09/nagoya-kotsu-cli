@@ -1,5 +1,8 @@
 # Project knowledge
 
+**CI and Nix Rust versions**
+CI and release workflows use the current Rust stable toolchain; the development shell follows the Rust version in `flake.lock`. They can differ. Rust 1.99 Clippy rejected the borrowed `stop_name` closure in bus live parsing while the Nix Rust 1.98 check passed. When CI lint fails, inspect its actual Rust version and validate the fix with that toolchain as well as the locked development shell.
+
 **Cargo package include patterns**
 Anchor release `include` patterns with a leading `/`. Unanchored names such as `README.md` and `LICENSE` also match files beneath `.direnv/flake-inputs`, and explicit includes override Git ignore rules. A local package check pulled Nixpkgs files into the archive until the patterns were rooted. Inspect the actual `.crate` file list, not just whether packaging compiles.
 
