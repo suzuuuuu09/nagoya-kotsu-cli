@@ -145,6 +145,8 @@ nkotsu docs show output --json
 
 開発Agent向けの `AGENTS.md` と `docs/agents/` は、リポジトリで作業する際の指示です。CLIの使い方は、上記の内蔵ドキュメントで確認してください。
 
+CLIを利用するエージェント向けに、[nagoya-kotsu skill](skills/nagoya-kotsu/SKILL.md)を用意しています。`skills/nagoya-kotsu/` を利用するエージェントのskillディレクトリへ配置してください。実行には、PATH上の `nkotsu` が必要です。skillは問い合わせに応じたコマンドの選択と結果の読み方を案内し、詳しい仕様はインストールされた版の内蔵ドキュメントで確認します。
+
 ## 時刻表の営業日と日種
 
 時刻表と接近情報は04:00を営業日の境界とし、00〜03時台を前の営業日の24〜27時台として表示します。
